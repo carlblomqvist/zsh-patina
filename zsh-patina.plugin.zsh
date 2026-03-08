@@ -52,7 +52,7 @@ _zsh_patina() {
         # send lines
         print -r -- "$BUFFER"
     } >&$fd || {
-        print -u2 "Write to socket failed"
+        print -u2 "zsh-patina: Write to socket failed"
         exec {fd}>&-
         return
     }
