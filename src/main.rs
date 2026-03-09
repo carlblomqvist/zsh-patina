@@ -1,4 +1,4 @@
-use std::{env, fs, path::PathBuf};
+use std::{env, fs, path::PathBuf, time::Duration};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -6,7 +6,7 @@ use figment::{
     Figment,
     providers::{Format, Serialized, Toml},
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::daemon::{start_daemon, status_daemon, stop_daemon};
 
@@ -32,18 +32,48 @@ enum Command {
     Status,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
 pub struct Config {
-    /// For performance reasons, highlighting is disabled for very long lines.
-    /// This option specifies maximum length of a line (in bytes) up to which
-    /// highlighting is applied.
-    max_line_length: usize,
+    pub highlighting: HighlightingConfig,
 }
 
-impl Default for Config {
+#[derive(Serialize, Deserialize)]
+pub struct HighlightingConfig {
+    /// For performance reasons, highlighting is disabled for very long lines.
+    /// This option specifies the maximum length of a line (in bytes) up to
+    /// which highlighting is applied.
+    pub max_line_length: usize,
+
+    /// The maximum time (in milliseconds) to spend on highlighting a command.
+    /// If highlighting takes longer, it will be aborted and the command will be
+    /// partially highlighted.
+    ///
+    /// Note that the timeout only applies to multi-line commands. Highlighting
+    /// cannot be aborted in the middle of a line. If you often deal with long
+    /// lines that take longer to highlight than the timeout, consider reducing
+    /// [max_line_length](Self::max_line_length).
+    #[serde(
+        rename = "timeout_ms",
+        serialize_with = "serialize_duration_ms",
+        deserialize_with = "deserialize_duration_ms"
+    )]
+    pub timeout: Duration,
+}
+
+fn serialize_duration_ms<S: Serializer>(duration: &Duration, s: S) -> Result<S::Ok, S::Error> {
+    s.serialize_u64(duration.as_millis() as u64)
+}
+
+fn deserialize_duration_ms<'de, D: Deserializer<'de>>(d: D) -> Result<Duration, D::Error> {
+    let ms = u64::deserialize(d)?;
+    Ok(Duration::from_millis(ms))
+}
+
+impl Default for HighlightingConfig {
     fn default() -> Self {
         Self {
             max_line_length: 20000,
+            timeout: Duration::from_millis(500),
         }
     }
 }

@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use syntect::{
     easy::HighlightLines,
     highlighting::{Color, Style, Theme},
@@ -46,12 +48,13 @@ pub struct Span {
 
 pub struct Highlighter {
     max_line_length: usize,
+    timeout: Duration,
     syntax_set: SyntaxSet,
     theme: Theme,
 }
 
 impl Highlighter {
-    pub fn new(max_line_length: usize) -> Self {
+    pub fn new(max_line_length: usize, timeout: Duration) -> Self {
         let syntax_set: SyntaxSet = syntect::dumps::from_uncompressed_data(include_bytes!(
             concat!(env!("OUT_DIR"), "/syntax_set.packdump")
         ))
@@ -64,6 +67,7 @@ impl Highlighter {
 
         Self {
             max_line_length,
+            timeout,
             syntax_set,
             theme,
         }
@@ -89,6 +93,8 @@ impl Highlighter {
     }
 
     fn highlight_internal(&self, command: &str) -> Vec<Span> {
+        let start = Instant::now();
+
         let syntax = self.syntax_set.find_syntax_by_extension("sh").unwrap();
 
         let mut h = HighlightLines::new(syntax, &self.theme);
@@ -98,6 +104,11 @@ impl Highlighter {
             if line.len() > self.max_line_length {
                 // skip lines that are too long
                 continue;
+            }
+
+            if start.elapsed() > self.timeout {
+                // stop if highlighting takes too long
+                break;
             }
 
             let ranges: Vec<(Style, &str)> = h.highlight_line(line, &self.syntax_set).unwrap();
