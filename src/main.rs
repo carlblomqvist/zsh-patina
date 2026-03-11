@@ -51,6 +51,10 @@ enum Command {
         /// command will be read from stdin.
         input_file: Option<String>,
     },
+
+    /// List all scopes that can be used in a theme for highlighting (sorted
+    /// alphabetically)
+    ListScopes,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -181,6 +185,16 @@ fn tokenize(config: &Config, input_file: &Option<String>) -> Result<()> {
     Ok(())
 }
 
+/// Print all scopes that can be used in a theme for highlighting (sorted
+/// alphabetically)
+fn list_scopes() -> Result<()> {
+    let scopes = include!(concat!(env!("OUT_DIR"), "/scopes.rs"));
+    for t in scopes {
+        println!("{t}");
+    }
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let home = PathBuf::from(env::var("HOME").context("$HOME not set")?);
     let config_dir = home.join(".config/zsh-patina");
@@ -210,5 +224,6 @@ fn main() -> Result<()> {
         }
         Command::Status => status_daemon(&data_dir),
         Command::Tokenize { input_file } => tokenize(&config, &input_file),
+        Command::ListScopes => list_scopes(),
     }
 }
