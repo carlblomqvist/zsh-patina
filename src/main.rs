@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use figment::{
     Figment,
@@ -17,7 +17,7 @@ use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 use crate::{
     daemon::{start_daemon, status_daemon, stop_daemon},
     highlighter::{Highlighter, Token},
-    theme::ThemeSource,
+    theme::{Theme, ThemeSource},
 };
 
 mod daemon;
@@ -111,9 +111,45 @@ impl Default for HighlightingConfig {
     }
 }
 
+/// Parse a color in the format #RRGGBB, #RGB, or an ANSI name to a terminal
+/// color
+pub fn parse_term_color(s: &str) -> Result<Color> {
+    Ok(match s.to_ascii_lowercase().as_str() {
+        "black" => Color::Black,
+        "red" => Color::Red,
+        "green" => Color::Green,
+        "yellow" => Color::Yellow,
+        "blue" => Color::Blue,
+        "magenta" => Color::Magenta,
+        "cyan" => Color::Cyan,
+        "white" => Color::White,
+        _ => {
+            let s = s.strip_prefix('#').context("Color must start with '#'")?;
+            if s.len() == 6 {
+                let r = u8::from_str_radix(&s[0..2], 16)?;
+                let g = u8::from_str_radix(&s[2..4], 16)?;
+                let b = u8::from_str_radix(&s[4..6], 16)?;
+                Color::Rgb(r, g, b)
+            } else if s.len() == 3 {
+                let mut r = u8::from_str_radix(&s[0..1], 16)?;
+                let mut g = u8::from_str_radix(&s[1..2], 16)?;
+                let mut b = u8::from_str_radix(&s[2..3], 16)?;
+                r |= r << 4;
+                g |= g << 4;
+                b |= b << 4;
+                Color::Rgb(r, g, b)
+            } else {
+                bail!("Color must be in the format #RRGGBB or #RGB");
+            }
+        }
+    })
+}
+
 /// Tokenize an input file and print the identified tokens to stdout. If the
 /// input file is `None`, read from stdin.
 fn tokenize(config: &Config, input_file: &Option<String>) -> Result<()> {
+    let theme = Theme::load(&config.highlighting.theme)?;
+
     // read input
     let input = if let Some(input_file) = input_file {
         fs::read_to_string(input_file)
@@ -175,8 +211,15 @@ fn tokenize(config: &Config, input_file: &Option<String>) -> Result<()> {
                 stdout.set_color(ColorSpec::new().set_fg(Some(Color::Rgb(96, 96, 96))))?;
                 write!(stdout, "{}", "·".repeat(leading_spaces))?;
             }
-            stdout.set_color(ColorSpec::new().set_fg(Some(Color::White)))?;
+
+            let color = if let Some(c) = theme.resolve(&t.scope) {
+                parse_term_color(c)?
+            } else {
+                Color::White
+            };
+            stdout.set_color(ColorSpec::new().set_fg(Some(color)))?;
             writeln!(stdout, "{}", l.trim())?;
+
             if trailing_spaces > 0 {
                 stdout.set_color(ColorSpec::new().set_fg(Some(Color::Rgb(96, 96, 96))))?;
                 write!(stdout, "{}", "·".repeat(trailing_spaces))?;

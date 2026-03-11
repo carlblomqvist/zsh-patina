@@ -148,6 +148,20 @@ impl Theme {
             }
         })
     }
+
+    /// Resolve a scope to a color by looking it up in the theme. If the scope
+    /// is not found, its parent scopes are tried until a match is found or
+    /// there are no more parent scopes left.
+    pub fn resolve<'a>(&'a self, scope: &str) -> Option<&'a str> {
+        let mut s = scope;
+        while !s.is_empty() {
+            if let Some(c) = self.scopes.get(s) {
+                return Some(c);
+            }
+            s = s.rsplit_once('.')?.0;
+        }
+        None
+    }
 }
 
 impl TryFrom<Theme> for SyntectTheme {
