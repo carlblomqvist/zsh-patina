@@ -187,7 +187,7 @@ In the unlikely case you don't like zsh-patina ☹️, you can remove it as foll
 3. Stop the daemon:
 
    ```shell
-   zsh-patina stop
+   ~/.zsh-patina/target/release/zsh-patina stop
    ```
 
 4. Delete the directory where `zsh-patina` is installed:
