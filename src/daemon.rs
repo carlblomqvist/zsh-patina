@@ -209,7 +209,7 @@ pub fn start_daemon(data_dir: &Path, config: &Config) -> Result<()> {
     //          once. The child continues.
     //
     // setsid: the child becomes session leader, fully detached from the
-    //         terminal and from ZSH's process group.
+    //         terminal and from Zsh's process group.
     //
     // Fork #2: the session-leader child forks again and exits.  The grandchild
     //          can never accidentally re-acquire a controlling terminal (POSIX
@@ -273,12 +273,12 @@ pub fn start_daemon(data_dir: &Path, config: &Config) -> Result<()> {
                 pool.spawn(|| {
                     // Handle connection and ignore any errors. Errors can
                     // happen in two cases:
-                    // * We are unable to read the input. In this case, ZSH will
+                    // * We are unable to read the input. In this case, Zsh will
                     //   generate an error message while the user is typing
                     //   ("broken pipe")
                     // * We are unable to highlight the command or send a
                     //   response. In this case, `stream` will be dropped and
-                    //   ZSH will just continue without highlighting.
+                    //   Zsh will just continue without highlighting.
                     let _ = handle_connection(stream, highlighter);
                 });
             }
