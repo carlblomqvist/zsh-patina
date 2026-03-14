@@ -20,6 +20,7 @@ pub enum ThemeSource {
     Simple,
     Patina,
     Lavender,
+    TokyoNight,
     File(String),
 }
 
@@ -32,6 +33,7 @@ impl Serialize for ThemeSource {
             ThemeSource::Simple => serializer.serialize_str("simple"),
             ThemeSource::Patina => serializer.serialize_str("patina"),
             ThemeSource::Lavender => serializer.serialize_str("lavender"),
+            ThemeSource::TokyoNight => serializer.serialize_str("tokyonight"),
             ThemeSource::File(path) => serializer.serialize_str(&format!("file:{path}")),
         }
     }
@@ -47,6 +49,7 @@ impl<'de> Deserialize<'de> for ThemeSource {
             "simple" => Ok(ThemeSource::Simple),
             "patina" => Ok(ThemeSource::Patina),
             "lavender" => Ok(ThemeSource::Lavender),
+            "tokyonight" => Ok(ThemeSource::TokyoNight),
             _ if s.starts_with("file:") => Ok(ThemeSource::File(
                 shellexpand::full(&s[5..])
                     .map_err(D::Error::custom)?
@@ -162,6 +165,10 @@ impl Theme {
                 .context("Unable to load default theme")?,
             ThemeSource::Lavender => toml::from_slice(include_bytes!("../themes/lavender.toml"))
                 .context("Unable to load lavender theme")?,
+            ThemeSource::TokyoNight => {
+                toml::from_slice(include_bytes!("../themes/tokyonight.toml"))
+                    .context("Unable to load tokyonight theme")?
+            }
             ThemeSource::File(path) => {
                 let theme_source = fs::read_to_string(path)
                     .with_context(|| format!("Failed to read theme file `{path}'"))?;

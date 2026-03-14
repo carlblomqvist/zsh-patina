@@ -1,3 +1,6 @@
+# This theme is based on Tokyo Night (Copyright (c) 2018-present Enkia, released
+# under the MIT license, https://github.com/tokyo-night/tokyo-night-vscode-theme)
+
 "comment" = "#9CA3B3"
 "string" = "#9ECE6A"
 "keyword.operator.regexp" = "#9ECE6A"
