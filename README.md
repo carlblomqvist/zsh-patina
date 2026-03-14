@@ -158,6 +158,7 @@ The following built-in themes are available:
 | `patina` | The default theme with a balanced color palette |
 | `simple` | A minimal theme with fewer colors |
 | `lavender` | A variant with magenta/lavender tones |
+| `tokyonight` | Celebrates the lights of downtown Tokyo at night. Originally by [enkia](https://github.com/tokyo-night/tokyo-night-vscode-theme). |
 
 To load a custom theme from a file, use the `file:` prefix:
 
