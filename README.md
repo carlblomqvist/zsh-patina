@@ -10,7 +10,7 @@ In contrast to other Zsh syntax highlighters (e.g. [zsh-syntax-highlighting](htt
 
 ## Examples
 
-<img src="https://raw.githubusercontent.com/michel-kraemer/zsh-patina/b46a12629765eade89ee817a6f0fd1545a5cf12f/.github/screenshot.png" alt="Screenshot" />
+<img src="https://raw.githubusercontent.com/michel-kraemer/zsh-patina/19d811a1f8af94161871b9cf1e0d8302a032c873/.github/screenshot.png" alt="Screenshot" />
 
 ## How to install
 
