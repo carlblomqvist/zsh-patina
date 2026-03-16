@@ -22,3 +22,7 @@
 
 # braces
 "punctuation.section" = "yellow"
+
+# dynamic items
+"dynamic.callable" = "white"
+"dynamic.callable.missing" = "red"

@@ -157,6 +157,17 @@ impl Theme {
         })
     }
 
+    /// Return `true` if the theme contains a style for the given scope
+    pub fn contains(&self, scope: &str) -> bool {
+        self.scopes.contains_key(scope)
+    }
+
+    /// Insert a scope into the theme and return the previous style for the
+    /// scope if it existed
+    pub fn insert(&mut self, scope: String, style: Style) -> Option<Style> {
+        self.scopes.insert(scope, style)
+    }
+
     /// Resolve a scope to a color by looking it up in the theme. If the scope
     /// is not found, its parent scopes are tried until a match is found or
     /// there are no more parent scopes left.
@@ -251,17 +262,14 @@ impl ScopeMapping {
         })
     }
 
-    pub fn decode(&self, color: &SyntectColor, theme: &Theme) -> Option<Style> {
+    pub fn decode(&self, color: &SyntectColor) -> Option<&str> {
         let id = (color.r as u32) << 24
             | (color.g as u32) << 16
             | (color.b as u32) << 8
             | (color.a as u32);
         match id {
             u32::MAX => None,
-            _ => {
-                let s = self.backward_mapping.get(id as usize)?;
-                theme.resolve(s)
-            }
+            _ => self.backward_mapping.get(id as usize).map(|s| s.as_str()),
         }
     }
 }

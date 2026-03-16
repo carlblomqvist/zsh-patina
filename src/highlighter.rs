@@ -6,15 +6,17 @@ use std::{
 use anyhow::{Context, Result};
 use syntect::{
     easy::HighlightLines,
-    highlighting::{Style, Theme as SyntectTheme},
+    highlighting::Theme as SyntectTheme,
     parsing::{ClearAmount, ParseState, ScopeStackOp, SyntaxSet},
     util::LinesWithEndings,
 };
 
 use crate::{
     HighlightingConfig,
-    theme::{ScopeMapping, Theme, ThemeSource},
+    theme::{ScopeMapping, Style, Theme, ThemeSource},
 };
+
+const CALLABLE: &str = "variable.function.shell";
 
 /// A span of text with a foreground color. The range is specified in terms of
 /// character indices, not byte indices.
@@ -25,6 +27,12 @@ pub struct Span {
     /// The ending character index of the span (exclusive)
     pub end: usize,
 
+    /// The span's style
+    pub style: SpanStyle,
+}
+
+#[derive(PartialEq, Eq)]
+pub struct StaticStyle {
     /// The foreground color of the span
     pub foreground_color: String,
 
@@ -36,6 +44,17 @@ pub struct Span {
 
     /// `true` if the text should be shown underlined
     pub underline: bool,
+}
+
+#[derive(PartialEq, Eq)]
+pub enum DynamicStyle {
+    Callable,
+}
+
+#[derive(PartialEq, Eq)]
+pub enum SpanStyle {
+    Static(StaticStyle),
+    Dynamic(DynamicStyle),
 }
 
 /// A token with a scope, line and column number, and range in the input command
@@ -65,13 +84,38 @@ fn find_prefix_split(command: &str) -> Option<usize> {
     }
 }
 
+/// Lookup a scope in a theme and convert the retrieved style to a
+/// [`StaticStyle`] struct
+fn resolve_static_style(scope: &str, theme: &Theme) -> Option<StaticStyle> {
+    let style = theme.resolve(scope)?;
+
+    let fg = style
+        .foreground
+        .map(|c| c.to_ansi_color())
+        .unwrap_or_else(|| "white".to_string());
+    let bg = style.background.map(|c| c.to_ansi_color());
+
+    // highlighting `white` (i.e. default terminal color) is not necessary
+    if fg == "white" && bg.is_none() && !style.bold && !style.underline {
+        None
+    } else {
+        Some(StaticStyle {
+            foreground_color: fg,
+            background_color: bg,
+            bold: style.bold,
+            underline: style.underline,
+        })
+    }
+}
+
 pub struct Highlighter {
     max_line_length: usize,
     timeout: Duration,
     syntax_set: SyntaxSet,
-    syntect_theme: SyntectTheme,
     theme: Theme,
     scope_mapping: ScopeMapping,
+    syntect_theme: SyntectTheme,
+    callable_choices: Vec<(&'static str, StaticStyle)>,
 }
 
 impl Highlighter {
@@ -81,25 +125,74 @@ impl Highlighter {
         ))
         .expect("Unable to load shell syntax");
 
-        let theme = Theme::load(&config.theme)?;
+        let mut theme = Theme::load(&config.theme)?;
+
+        // Insert dummy style for callables into the theme. We need it as a
+        // marker so Syntect returns a token for it.
+        if !theme.contains(CALLABLE) {
+            if let Some(callable_style) = theme.resolve(CALLABLE) {
+                // Try to fallback to the style for callables so our dynamic
+                // style gets a valid `else` option.
+                theme.insert(CALLABLE.to_string(), callable_style);
+            } else {
+                // It doesn't matter what we insert as a fallback. It will be
+                // overwritten by our dynamic style later anyhow.
+                theme.insert(CALLABLE.to_string(), Style::default());
+            }
+        }
+
         let scope_mapping = ScopeMapping::new(&theme);
 
-        Ok(Self {
-            max_line_length: config.max_line_length,
-            timeout: config.timeout,
-            syntax_set,
-            syntect_theme: theme.to_syntect(&scope_mapping).with_context(|| {
-                match &config.theme {
+        let syntect_theme =
+            theme
+                .to_syntect(&scope_mapping)
+                .with_context(|| match &config.theme {
                     ThemeSource::Simple => "Failed to parse simple theme".to_string(),
                     ThemeSource::Patina => "Failed to parse default theme".to_string(),
                     ThemeSource::Lavender => "Failed to parse lavender theme".to_string(),
                     ThemeSource::TokyoNight => "Failed to parse tokyonight theme".to_string(),
                     ThemeSource::File(path) => format!("Failed to parse theme file `{path}'"),
-                }
-            })?,
+                })?;
+
+        let mut callable_choices = Vec::new();
+        if let Some(alias_style) = resolve_static_style("dynamic.callable.alias.shell", &theme) {
+            callable_choices.push(("alias", alias_style));
+        }
+        if let Some(builtin_style) = resolve_static_style("dynamic.callable.builtin.shell", &theme)
+        {
+            callable_choices.push(("builtin", builtin_style));
+        }
+        if let Some(command_style) = resolve_static_style("dynamic.callable.command.shell", &theme)
+        {
+            callable_choices.push(("command", command_style));
+        }
+        if let Some(function_style) =
+            resolve_static_style("dynamic.callable.function.shell", &theme)
+        {
+            callable_choices.push(("function", function_style));
+        }
+        if let Some(missing_style) = resolve_static_style("dynamic.callable.missing.shell", &theme)
+        {
+            callable_choices.push(("missing", missing_style));
+        }
+        if let Some(else_style) = resolve_static_style(CALLABLE, &theme) {
+            callable_choices.push(("else", else_style));
+        }
+
+        Ok(Self {
+            max_line_length: config.max_line_length,
+            timeout: config.timeout,
+            syntax_set,
             theme,
             scope_mapping,
+            syntect_theme,
+            callable_choices,
         })
+    }
+
+    /// Return a list of dynamic style choices the plugin has for callables
+    pub fn callable_choices(&self) -> &[(&'static str, StaticStyle)] {
+        &self.callable_choices
     }
 
     pub fn highlight(&self, command: &str) -> Result<Vec<Span>> {
@@ -135,35 +228,27 @@ impl Highlighter {
                 break;
             }
 
-            let ranges: Vec<(Style, &str)> = h.highlight_line(line, &self.syntax_set)?;
+            let ranges = h.highlight_line(line, &self.syntax_set)?;
 
             for r in ranges {
-                let style = self
-                    .scope_mapping
-                    .decode(&r.0.foreground, &self.theme)
-                    .unwrap_or_default();
-
-                let fg = style
-                    .foreground
-                    .map(|c| c.to_ansi_color())
-                    .unwrap_or_else(|| "white".to_string());
-                let bg = style.background.map(|c| c.to_ansi_color());
-
                 // this is O(n) but necessary in case the command contains
                 // multi-byte characters
                 let len = r.1.chars().count();
 
-                // highlighting `None` or `white` (i.e. default terminal color)
-                // is not necessary
-                if fg != "white" || bg.is_some() || style.bold || style.underline {
-                    result.push(Span {
-                        start: i,
-                        end: i + len,
-                        foreground_color: fg,
-                        background_color: bg,
-                        bold: style.bold,
-                        underline: style.underline,
-                    });
+                if let Some(scope) = self.scope_mapping.decode(&r.0.foreground) {
+                    let style = if scope == CALLABLE {
+                        Some(SpanStyle::Dynamic(DynamicStyle::Callable))
+                    } else {
+                        resolve_static_style(scope, &self.theme).map(SpanStyle::Static)
+                    };
+
+                    if let Some(style) = style {
+                        result.push(Span {
+                            start: i,
+                            end: i + len,
+                            style,
+                        });
+                    }
                 }
 
                 i += len;

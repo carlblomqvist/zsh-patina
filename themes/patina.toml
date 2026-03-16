@@ -40,3 +40,7 @@
 
 # braces
 "punctuation.section" = "yellow"
+
+# dynamic items
+"dynamic.callable" = "cyan"
+"dynamic.callable.missing" = "red"

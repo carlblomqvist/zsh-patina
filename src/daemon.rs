@@ -15,7 +15,7 @@ use std::{
 use crate::{
     Config,
     check::check_config,
-    highlighter::{Highlighter, Span},
+    highlighter::{DynamicStyle, Highlighter, Span, SpanStyle, StaticStyle},
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -44,6 +44,21 @@ fn pid_alive(pid: u32) -> bool {
     // kill(pid, 0) returns 0 if the process exists and we have permission to
     // signal it
     unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+}
+
+/// Convert a static style to the format that Zsh's `region_highlight` uses
+fn format_static_style(style: &StaticStyle) -> String {
+    let mut result = format!("fg={}", style.foreground_color);
+    if let Some(bg) = &style.background_color {
+        result.push_str(&format!(",bg={}", bg));
+    }
+    if style.bold {
+        result.push_str(",bold");
+    }
+    if style.underline {
+        result.push_str(",underline");
+    }
+    result
 }
 
 fn handle_connection(mut stream: UnixStream, highlighter: Arc<Highlighter>) -> Result<()> {
@@ -161,15 +176,12 @@ fn handle_connection(mut stream: UnixStream, highlighter: Arc<Highlighter>) -> R
     // skip spans outside the current terminal window
     result.retain(|s| s.start < max && s.end > min);
 
-    // merge consecutive spans with the same color
+    // merge consecutive spans with the same style
     let mut merged: Vec<Span> = Vec::new();
     for span in result {
         if let Some(prev) = merged.last_mut()
             && prev.end == span.start
-            && prev.foreground_color == span.foreground_color
-            && prev.background_color == span.background_color
-            && prev.bold == span.bold
-            && prev.underline == span.underline
+            && prev.style == span.style
         {
             prev.end = span.end;
         } else {
@@ -179,17 +191,31 @@ fn handle_connection(mut stream: UnixStream, highlighter: Arc<Highlighter>) -> R
 
     for s in merged {
         // write response
-        let mut message = format!("{} {} fg={}", s.start, s.end, s.foreground_color);
-        if let Some(bg) = s.background_color {
-            message.push_str(&format!(",bg={}", bg));
-        }
-        if s.bold {
-            message.push_str(",bold");
-        }
-        if s.underline {
-            message.push_str(",underline");
-        }
-        message.push('\n');
+        let message = match s.style {
+            SpanStyle::Static(static_style) => {
+                format!(
+                    "{} {} {}\n",
+                    s.start,
+                    s.end,
+                    format_static_style(&static_style)
+                )
+            }
+            SpanStyle::Dynamic(dynamic_style) => match dynamic_style {
+                DynamicStyle::Callable => {
+                    format!(
+                        "-DYNAMIC|{} {}|{}\n",
+                        s.start,
+                        s.end,
+                        highlighter
+                            .callable_choices()
+                            .iter()
+                            .map(|c| format!("{}:{}", c.0, format_static_style(&c.1)))
+                            .collect::<Vec<_>>()
+                            .join(";")
+                    )
+                }
+            },
+        };
         stream
             .write_all(message.as_bytes())
             .context("Unable to send response")?;
