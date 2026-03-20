@@ -12,13 +12,10 @@ pub enum PathType {
 
 /// Get the metadata of the given path
 /// * If the path is relative, it is resolved against the provided `pwd`.
-/// * If the path starts with a tilde (~), it is resolved against the user's
-///   home directory
 /// * If the path does not exist or the user lacks permission to access it, the
 ///   function returns `None`.
 fn metadata(path: &str, pwd: &str) -> Option<Metadata> {
-    let path = shellexpand::tilde(path);
-    let path = Path::new(path.as_ref());
+    let path = Path::new(path);
     let path = if path.is_absolute() {
         path.to_path_buf()
     } else {
@@ -29,8 +26,6 @@ fn metadata(path: &str, pwd: &str) -> Option<Metadata> {
 
 /// Get the type of the given path (file or directory).
 /// * If the path is relative, it is resolved against the provided `pwd`.
-/// * If the path starts with a tilde (~), it is resolved against the user's
-///   home directory
 /// * If the path does not exist or the user lacks permission to access it, the
 ///   function returns `None`.
 pub fn path_type(path: &str, pwd: &str) -> Option<PathType> {
@@ -44,8 +39,6 @@ pub fn path_type(path: &str, pwd: &str) -> Option<PathType> {
 
 /// Check if the given path is an executable file.
 /// * If the path is relative, it is resolved against the provided `pwd`.
-/// * If the path starts with a tilde (~), it is resolved against the user's
-///   home directory
 /// * If the path is a directory, it is only considered executable if it ends
 ///   with a slash.
 pub fn is_path_executable(path: &str, pwd: &str) -> bool {
@@ -87,13 +80,6 @@ mod tests {
         let md = metadata("relative.txt", dir.path().to_str().unwrap());
         assert!(md.is_some());
         assert!(md.unwrap().is_file());
-    }
-
-    #[test]
-    fn metadata_tilde_expansion() {
-        let md = metadata("~/", "/this/path/does/not/exist");
-        assert!(md.is_some());
-        assert!(md.unwrap().is_dir());
     }
 
     #[test]

@@ -1,6 +1,6 @@
-use std::ops::Range;
+use std::{env, ops::Range};
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 
 use crate::{
     path::{PathType, is_path_executable, path_type},
@@ -207,9 +207,7 @@ impl DynamicTokenGroup {
 
                 DynamicScope::Callable
                 | DynamicScope::StringQuotedDoubleArguments
-                | DynamicScope::StringQuotedDoubleCallable
-                | DynamicScope::TildeArguments
-                | DynamicScope::TildeCallable => {
+                | DynamicScope::StringQuotedDoubleCallable => {
                     let c = &line[t.byte_range.clone()];
                     let len = c.chars().count();
                     s.push_str(c);
@@ -229,6 +227,21 @@ impl DynamicTokenGroup {
 
                 DynamicScope::StringQuotedDoubleEnd => {
                     end += 1;
+                }
+
+                DynamicScope::TildeArguments | DynamicScope::TildeCallable => {
+                    let c = &line[t.byte_range.clone()];
+
+                    // resolve tilde at the beginning of a string
+                    if start == end {
+                        let home = env::var_os("HOME").context("$HOME not set")?;
+                        s.push_str(home.to_str().context("Unable to convert $HOME to string")?);
+                    } else {
+                        s.push_str(c);
+                    }
+
+                    let len = c.chars().count();
+                    end += len;
                 }
             }
         }

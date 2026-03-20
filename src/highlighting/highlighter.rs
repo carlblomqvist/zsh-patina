@@ -64,7 +64,7 @@ pub fn update_groups(
 
     // try to extend last group
     let dynamic_type = match scope {
-        ARGUMENTS | STRING_QUOTED_DOUBLE_ARGUMENTS => {
+        ARGUMENTS | STRING_QUOTED_DOUBLE_ARGUMENTS | TILDE_ARGUMENTS => {
             if let Some(group) = groups.last_mut()
                 && group.range.end == range.start
                 && group.dynamic_type != DynamicType::Callable
@@ -81,7 +81,7 @@ pub fn update_groups(
             }
         }
 
-        CALLABLE | STRING_QUOTED_DOUBLE_CALLABLE => {
+        CALLABLE | STRING_QUOTED_DOUBLE_CALLABLE | TILDE_CALLABLE => {
             if let Some(group) = groups.last_mut()
                 && group.range.end == range.start
                 && group.dynamic_type != DynamicType::Arguments
@@ -112,10 +112,6 @@ pub fn update_groups(
                 DynamicType::Unknown
             }
         }
-
-        TILDE_ARGUMENTS => DynamicType::Arguments,
-
-        TILDE_CALLABLE => DynamicType::Callable,
 
         _ => return,
     };
@@ -827,6 +823,26 @@ mod tests {
             }]
         );
 
+        let highlighted = highlighter.highlight(r#""~""#, pwd, |_| true)?;
+        assert_eq!(
+            highlighted,
+            vec![Span {
+                start: 0,
+                end: 3,
+                style: SpanStyle::Dynamic(DynamicStyle::Callable)
+            }]
+        );
+
+        let highlighted = highlighter.highlight(r#""~/""#, pwd, |_| true)?;
+        assert_eq!(
+            highlighted,
+            vec![Span {
+                start: 0,
+                end: 4,
+                style: SpanStyle::Dynamic(DynamicStyle::Callable)
+            }]
+        );
+
         Ok(())
     }
 
@@ -838,8 +854,13 @@ mod tests {
 
         let highlighter = Highlighter::new(&test_config())?;
         let tilde_style = resolve_static_style(TILDE, &highlighter.theme).unwrap();
+        let string_style = resolve_static_style(STRING_QUOTED_DOUBLE, &highlighter.theme).unwrap();
         let dynamic_directory_style =
             resolve_static_style(DYNAMIC_PATH_DIRECTORY, &highlighter.theme).unwrap();
+        let dynamic_tilde_directory_style = mix_styles(
+            &SpanStyle::Static(tilde_style.clone()),
+            &SpanStyle::Static(dynamic_directory_style.clone()),
+        );
 
         let highlighted = highlighter.highlight("ls ~", pwd, |_| true)?;
         assert_eq!(
@@ -853,7 +874,7 @@ mod tests {
                 Span {
                     start: 3,
                     end: 4,
-                    style: SpanStyle::Static(tilde_style)
+                    style: dynamic_tilde_directory_style.clone()
                 }
             ]
         );
@@ -869,8 +890,30 @@ mod tests {
                 },
                 Span {
                     start: 3,
+                    end: 4,
+                    style: dynamic_tilde_directory_style.clone()
+                },
+                Span {
+                    start: 4,
                     end: 5,
                     style: SpanStyle::Static(dynamic_directory_style)
+                }
+            ]
+        );
+
+        let highlighted = highlighter.highlight(r#"ls "~/""#, pwd, |_| true)?;
+        assert_eq!(
+            highlighted,
+            vec![
+                Span {
+                    start: 0,
+                    end: 2,
+                    style: SpanStyle::Dynamic(DynamicStyle::Callable)
+                },
+                Span {
+                    start: 3,
+                    end: 7,
+                    style: SpanStyle::Static(string_style.clone())
                 }
             ]
         );
@@ -878,11 +921,35 @@ mod tests {
         let highlighted = highlighter.highlight("ls ~/this/path/does/not/exist", pwd, |_| true)?;
         assert_eq!(
             highlighted,
-            vec![Span {
-                start: 0,
-                end: 2,
-                style: SpanStyle::Dynamic(DynamicStyle::Callable)
-            }]
+            vec![
+                Span {
+                    start: 0,
+                    end: 2,
+                    style: SpanStyle::Dynamic(DynamicStyle::Callable)
+                },
+                Span {
+                    start: 3,
+                    end: 4,
+                    style: SpanStyle::Static(tilde_style.clone())
+                }
+            ]
+        );
+
+        let highlighted = highlighter.highlight("ls test/~/", pwd, |_| true)?;
+        assert_eq!(
+            highlighted,
+            vec![
+                Span {
+                    start: 0,
+                    end: 2,
+                    style: SpanStyle::Dynamic(DynamicStyle::Callable)
+                },
+                Span {
+                    start: 8,
+                    end: 9,
+                    style: SpanStyle::Static(tilde_style.clone())
+                }
+            ]
         );
 
         Ok(())
