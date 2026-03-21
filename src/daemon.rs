@@ -323,7 +323,7 @@ fn handle_connection(mut stream: UnixStream, highlighter: Arc<Highlighter>) -> R
 pub fn activate(data_dir: &Path, config: &Config) -> Result<()> {
     check_config(config)?;
 
-    if start_daemon_internal(data_dir, config)? == Role::Parent {
+    if start_daemon_internal(data_dir, config, false)? == Role::Parent {
         let exe = std::env::current_exe()?;
 
         let template = ActivateTemplate {
@@ -338,17 +338,21 @@ pub fn activate(data_dir: &Path, config: &Config) -> Result<()> {
     Ok(())
 }
 
-pub fn start_daemon(data_dir: &Path, config: &Config) -> Result<()> {
-    start_daemon_internal(data_dir, config)?;
+pub fn start_daemon(data_dir: &Path, config: &Config, no_daemon: bool) -> Result<()> {
+    start_daemon_internal(data_dir, config, no_daemon)?;
     Ok(())
 }
 
-fn start_daemon_internal(data_dir: &Path, config: &Config) -> Result<Role> {
+fn start_daemon_internal(data_dir: &Path, config: &Config, no_daemon: bool) -> Result<Role> {
     let pid_file = pid_path(data_dir);
 
     if let Some(pid) = read_pid(&pid_file)
         && pid_alive(pid)
     {
+        if no_daemon {
+            println!("Daemon is already running. PID {pid}.");
+        }
+
         // daemon is already running
         return Ok(Role::Parent);
     }
@@ -362,61 +366,63 @@ fn start_daemon_internal(data_dir: &Path, config: &Config) -> Result<Role> {
     // Make sure the data directory exists
     fs::create_dir_all(data_dir).context("Unable to create data directory")?;
 
-    // Double-fork:
-    //
-    // Fork #1: the parent exits immediately so the `start` call returns at
-    //          once. The child continues.
-    //
-    // setsid: the child becomes session leader, fully detached from the
-    //         terminal and from Zsh's process group.
-    //
-    // Fork #2: the session-leader child forks again and exits.  The grandchild
-    //          can never accidentally re-acquire a controlling terminal (POSIX
-    //          guarantee).
-    //
-    // The grandchild is then adopted by PID 1 (init/systemd) and runs as a true
-    // background daemon.
+    if !no_daemon {
+        // Double-fork:
+        //
+        // Fork #1: the parent exits immediately so the `start` call returns at
+        //          once. The child continues.
+        //
+        // setsid: the child becomes session leader, fully detached from the
+        //         terminal and from Zsh's process group.
+        //
+        // Fork #2: the session-leader child forks again and exits. The
+        //          grandchild can never accidentally re-acquire a controlling
+        //          terminal (POSIX guarantee).
+        //
+        // The grandchild is then adopted by PID 1 (init/systemd) and runs as a
+        // true background daemon.
 
-    // fork #1
-    match unsafe { libc::fork() } {
-        -1 => {
-            bail!("fork #1 failed");
+        // fork #1
+        match unsafe { libc::fork() } {
+            -1 => {
+                bail!("fork #1 failed");
+            }
+            0 => {
+                // child: continue below
+            }
+            _ => {
+                // parent: return immediately
+                return Ok(Role::Parent);
+            }
         }
-        0 => {
-            // child: continue below
-        }
-        _ => {
-            // parent: return immediately
-            return Ok(Role::Parent);
-        }
-    }
 
-    // become session leader
-    unsafe { libc::setsid() };
+        // become session leader
+        unsafe { libc::setsid() };
 
-    // fork #2
-    match unsafe { libc::fork() } {
-        -1 => {
-            bail!("fork #2 failed");
+        // fork #2
+        match unsafe { libc::fork() } {
+            -1 => {
+                bail!("fork #2 failed");
+            }
+            0 => {
+                // grandchild
+            }
+            _ => {
+                // intermediate child: exit
+                return Ok(Role::Child);
+            }
         }
-        0 => {
-            // grandchild
-        }
-        _ => {
-            // intermediate child: exit
-            return Ok(Role::Child);
-        }
-    }
 
-    // from here on, we are a true background daemon ...
+        // from here on, we are a true background daemon ...
 
-    // close all file descriptors so we're really decoupled from the parent
-    // process
-    unsafe {
-        let devnull = std::fs::File::open("/dev/null").unwrap();
-        libc::dup2(devnull.as_raw_fd(), libc::STDIN_FILENO);
-        libc::dup2(devnull.as_raw_fd(), libc::STDOUT_FILENO);
-        libc::dup2(devnull.as_raw_fd(), libc::STDERR_FILENO);
+        // close all file descriptors so we're really decoupled from the parent
+        // process
+        unsafe {
+            let devnull = std::fs::File::open("/dev/null").unwrap();
+            libc::dup2(devnull.as_raw_fd(), libc::STDIN_FILENO);
+            libc::dup2(devnull.as_raw_fd(), libc::STDOUT_FILENO);
+            libc::dup2(devnull.as_raw_fd(), libc::STDERR_FILENO);
+        }
     }
 
     // write our PID so that `stop` and `status` can find us

@@ -54,7 +54,11 @@ enum Command {
     Activate,
 
     /// Start the highlighter daemon if it's not already running
-    Start,
+    Start {
+        /// Start the highlighter in foreground mode
+        #[arg(long, default_value = "false")]
+        no_daemon: bool,
+    },
 
     /// Stop the highlighter daemon if it's not already stopped
     Stop,
@@ -278,11 +282,11 @@ fn run() -> Result<()> {
 
     match args.command {
         Command::Activate => activate(&data_dir, &config),
-        Command::Start => start_daemon(&data_dir, &config),
+        Command::Start { no_daemon } => start_daemon(&data_dir, &config, no_daemon),
         Command::Stop => stop_daemon(&data_dir),
         Command::Restart => {
             stop_daemon(&data_dir)?;
-            start_daemon(&data_dir, &config)
+            start_daemon(&data_dir, &config, false)
         }
         Command::Status => status_daemon(&data_dir),
         Command::Check => {
