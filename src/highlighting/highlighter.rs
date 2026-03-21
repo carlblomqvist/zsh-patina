@@ -117,6 +117,7 @@ fn mix_styles(base: &SpanStyle, mixin: &SpanStyle) -> SpanStyle {
 pub struct Highlighter {
     max_line_length: usize,
     timeout: Duration,
+    dynamic_enabled: bool,
     syntax_set: SyntaxSet,
     theme: Theme,
     scope_mapping: ScopeMapping,
@@ -176,6 +177,7 @@ impl Highlighter {
         Ok(Self {
             max_line_length: config.max_line_length,
             timeout: config.timeout,
+            dynamic_enabled: config.dynamic,
             syntax_set,
             theme,
             scope_mapping,
@@ -269,8 +271,10 @@ impl Highlighter {
                 i += len;
             }
 
-            // highlight all groups
-            if let Some(pwd) = pwd {
+            // perform dynamic highlighting
+            if self.dynamic_enabled
+                && let Some(pwd) = pwd
+            {
                 for g in dynamic_builder.build(&ops, byte_offset) {
                     if let Ok(group_spans) = g.highlight(command, pwd, &self.theme) {
                         mixins.extend(group_spans);
@@ -281,8 +285,10 @@ impl Highlighter {
             byte_offset += line.len();
         }
 
-        // highlight remaining groups
-        if let Some(pwd) = pwd {
+        // perform dynamic highlighting for the remaining groups
+        if self.dynamic_enabled
+            && let Some(pwd) = pwd
+        {
             for g in dynamic_builder.finish(byte_offset) {
                 if let Ok(group_spans) = g.highlight(command, pwd, &self.theme) {
                     mixins.extend(group_spans);
@@ -490,6 +496,31 @@ mod tests {
                 }
             ]
         );
+        Ok(())
+    }
+
+    #[test]
+    fn dynamic_highlighting_disabled() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let test_path = dir.path().join("test.txt");
+        fs::write(test_path, "test contents")?;
+        let pwd = Some(dir.path().to_str().unwrap());
+
+        let mut config = test_config();
+        config.dynamic = false;
+        let highlighter = Highlighter::new(&config)?;
+        let callable_style = resolve_static_style(CALLABLE, &highlighter.theme).unwrap();
+
+        let highlighted = highlighter.highlight("ls test.txt", pwd, |_| true)?;
+        assert_eq!(
+            highlighted,
+            vec![Span {
+                start: 0,
+                end: 2,
+                style: SpanStyle::Static(callable_style)
+            }]
+        );
+
         Ok(())
     }
 

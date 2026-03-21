@@ -93,6 +93,35 @@ pub struct Config {
 
 #[derive(Serialize, Deserialize)]
 pub struct HighlightingConfig {
+    /// Either the name of a built-in theme (`"simple"`, `"patina"`,
+    /// `"lavender"`) or a string in the form `"file:mytheme.toml"` pointing to
+    /// a custom theme toml file.
+    pub theme: ThemeSource,
+
+    /// If enabled, zsh-patina will highlight callables (aliases, builtins,
+    /// commands, and functions) as well as files and directories dynamically
+    /// based on whether they exist (and the user has permission to
+    /// execute/access them).
+    ///
+    /// Callables that cannot be called are highlighted with the theme's
+    /// `dynamic.callable.missing.shell` scope (`red` by default) and with the
+    /// scopes `dynamic.callable.alias.shell`, `dynamic.callable.builtin.shell`,
+    /// `dynamic.callable.command.shell`, or `dynamic.callable.function.shell`
+    /// if they do exist and are executable. Files and directories that exist
+    /// and can be accessed are highlighted with the scopes
+    /// `dynamic.path.file.shell` and `dynamic.path.directory.shell`,
+    /// respectively.
+    ///
+    /// The styles of the dynamic scopes are mixed into the normal styles, which
+    /// means, first the normal styles are applied, and then every attribute of
+    /// the dynamic style overwrites the normal style's attribute with the same
+    /// name. For example, if `variable.function.shell` (the normal style for
+    /// callables if dynamic highlighting is disabled) specifies that a callable
+    /// should be highlighted in blue, and `dynamic.callable.command.shell`
+    /// specifies `underline = true`, then any command that exists and can be
+    /// executed will be highlighted in blue and underlined.
+    pub dynamic: bool,
+
     /// For performance reasons, highlighting is disabled for very long lines.
     /// This option specifies the maximum length of a line (in bytes) up to
     /// which highlighting is applied.
@@ -112,11 +141,6 @@ pub struct HighlightingConfig {
         deserialize_with = "deserialize_duration_ms"
     )]
     pub timeout: Duration,
-
-    /// Either the name of a built-in theme (`"simple"`, `"patina"`,
-    /// `"lavender"`) or a string in the form `"file:mytheme.toml"` pointing to
-    /// a custom theme toml file.
-    pub theme: ThemeSource,
 }
 
 fn serialize_duration_ms<S: Serializer>(duration: &Duration, s: S) -> Result<S::Ok, S::Error> {
@@ -131,9 +155,10 @@ fn deserialize_duration_ms<'de, D: Deserializer<'de>>(d: D) -> Result<Duration, 
 impl Default for HighlightingConfig {
     fn default() -> Self {
         Self {
+            theme: ThemeSource::Patina,
+            dynamic: true,
             max_line_length: 20000,
             timeout: Duration::from_millis(500),
-            theme: ThemeSource::Patina,
         }
     }
 }
