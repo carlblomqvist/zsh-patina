@@ -22,6 +22,7 @@ pub enum DynamicScope {
     StringQuotedSingleAnsi,
     StringQuotedDouble,
     Tilde,
+    PoisonPill,
 }
 
 #[derive(Debug)]
@@ -221,6 +222,20 @@ impl DynamicTokenGroup {
                     let len = c.chars().count();
                     end += len;
                 }
+
+                DynamicScope::PoisonPill => {
+                    // A poison pill means that the current string contains a
+                    // scope that prevents this string from being dynamically
+                    // highlighted (e.g. an environment variable or a command
+                    // substitution). Throw away this string.
+                    s = String::new();
+
+                    // skip poison pill contents
+                    let c = &line[t.byte_range.clone()];
+                    let len = c.chars().count();
+                    end += len;
+                    start = end;
+                }
             }
         }
 
@@ -253,7 +268,8 @@ pub struct DynamicTokenGroupBuilder {
     string_quoted_single_scope: Scope,
     string_quoted_sigle_ansi_scope: Scope,
     string_quoted_double_scope: Scope,
-    tilde_scope: Scope,
+    tilde_variable_scope: Scope,
+    tilde_meta_scope: Scope,
 }
 
 impl DynamicTokenGroupBuilder {
@@ -266,7 +282,8 @@ impl DynamicTokenGroupBuilder {
         let string_quoted_single_scope = Scope::new(STRING_QUOTED_SINGLE).unwrap();
         let string_quoted_sigle_ansi_scope = Scope::new(STRING_QUOTED_SINGLE_ANSI).unwrap();
         let string_quoted_double_scope = Scope::new(STRING_QUOTED_DOUBLE).unwrap();
-        let tilde_scope = Scope::new(TILDE).unwrap();
+        let tilde_variable_scope = Scope::new(TILDE_VARIABLE).unwrap();
+        let tilde_meta_scope = Scope::new(TILDE_META).unwrap();
         Self {
             arguments_scope,
             callable_scope,
@@ -276,7 +293,8 @@ impl DynamicTokenGroupBuilder {
             string_quoted_single_scope,
             string_quoted_sigle_ansi_scope,
             string_quoted_double_scope,
-            tilde_scope,
+            tilde_variable_scope,
+            tilde_meta_scope,
         }
     }
 
@@ -306,7 +324,8 @@ impl DynamicTokenGroupBuilder {
                     || *scope == builder.string_quoted_single_scope
                     || *scope == builder.string_quoted_sigle_ansi_scope
                     || *scope == builder.string_quoted_double_scope
-                    || *scope == builder.tilde_scope)
+                    || *scope == builder.tilde_variable_scope
+                    || current_group.current_scope.last() == Some(&DynamicScope::PoisonPill))
             {
                 if let Some(current_scope) = current_group.current_scope.pop()
                     && i != current_group.current_start
@@ -317,6 +336,9 @@ impl DynamicTokenGroupBuilder {
                     ));
                 }
                 current_group.current_start = i;
+            } else if !group_stack.is_empty() && *scope == builder.tilde_meta_scope {
+                // this can be ignored - tilde will be caught by
+                // `tilde_variable_scope`
             } else if group_stack.is_empty()
                 && *scope == builder.character_escape_scope
                 && let Some(ce) = character_escape_buf.last_mut()
@@ -381,37 +403,41 @@ impl DynamicTokenGroupBuilder {
                                 .current_scope
                                 .contains(&DynamicScope::StringQuotedSingleAnsi)
                             {
-                                Some(DynamicScope::CharacterEscapeQuotedAnsi)
+                                DynamicScope::CharacterEscapeQuotedAnsi
                             } else {
-                                Some(DynamicScope::CharacterEscape)
+                                DynamicScope::CharacterEscape
                             }
                         } else if *scope == self.string_quoted_begin_scope {
-                            Some(DynamicScope::StringQuotedBegin)
+                            DynamicScope::StringQuotedBegin
                         } else if *scope == self.string_quoted_end_scope {
-                            Some(DynamicScope::StringQuotedEnd)
+                            DynamicScope::StringQuotedEnd
                         } else if *scope == self.string_quoted_single_scope {
-                            Some(DynamicScope::StringQuotedSingle)
+                            DynamicScope::StringQuotedSingle
                         } else if *scope == self.string_quoted_sigle_ansi_scope {
-                            Some(DynamicScope::StringQuotedSingleAnsi)
+                            DynamicScope::StringQuotedSingleAnsi
                         } else if *scope == self.string_quoted_double_scope {
-                            Some(DynamicScope::StringQuotedDouble)
-                        } else if *scope == self.tilde_scope {
-                            Some(DynamicScope::Tilde)
+                            DynamicScope::StringQuotedDouble
+                        } else if *scope == self.tilde_variable_scope
+                            || *scope == self.tilde_meta_scope
+                        {
+                            DynamicScope::Tilde
                         } else {
-                            None
+                            // Unknown token found. We should not dynamically
+                            // highlight this group. Insert a poison pill so
+                            // [DynamicTokenGroup::parse()] will later skip it.
+                            DynamicScope::PoisonPill
                         };
-                        if let Some(new_dynamic_scope) = new_dynamic_scope {
-                            if let Some(current_scope) = current_group.current_scope.last()
-                                && *i != current_group.current_start
-                            {
-                                current_group.tokens.push(DynamicToken::new(
-                                    current_group.current_start..*i,
-                                    *current_scope,
-                                ));
-                            }
-                            current_group.current_scope.push(new_dynamic_scope);
-                            current_group.current_start = *i;
+
+                        if let Some(current_scope) = current_group.current_scope.last()
+                            && *i != current_group.current_start
+                        {
+                            current_group.tokens.push(DynamicToken::new(
+                                current_group.current_start..*i,
+                                *current_scope,
+                            ));
                         }
+                        current_group.current_scope.push(new_dynamic_scope);
+                        current_group.current_start = *i;
                     }
                     stack.push(scope);
                 }

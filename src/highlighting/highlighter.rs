@@ -31,7 +31,10 @@ fn find_prefix_split(command: &str) -> Option<usize> {
     }
 }
 
-fn mix_spans(base: Vec<Span>, mixins: Vec<Span>) -> Vec<Span> {
+fn mix_spans(base: Vec<Span>, mut mixins: Vec<Span>) -> Vec<Span> {
+    // make sure mixins are sorted
+    mixins.sort_unstable_by(|a, b| a.start.cmp(&b.start).then(a.end.cmp(&b.end)));
+
     // collect all boundary positions where the active state changes
     let mut positions = Vec::new();
     for s in base.iter().chain(mixins.iter()) {
@@ -839,7 +842,7 @@ mod tests {
         let pwd = Some(dir.path().to_str().unwrap());
 
         let highlighter = Highlighter::new(&test_config())?;
-        let tilde_style = resolve_static_style(TILDE, &highlighter.theme).unwrap();
+        let tilde_style = resolve_static_style(TILDE_VARIABLE, &highlighter.theme).unwrap();
         let string_style = resolve_static_style(STRING_QUOTED_DOUBLE, &highlighter.theme).unwrap();
         let dynamic_directory_style =
             resolve_static_style(DYNAMIC_PATH_DIRECTORY, &highlighter.theme).unwrap();
@@ -1600,6 +1603,179 @@ mod tests {
                 underline,
             }),
         }
+    }
+
+    #[test]
+    fn path_with_env_variable() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let test_path = dir.path().join("test.txt");
+        fs::write(test_path, "test contents")?;
+        let env_path = dir.path().join("test.txt$FOOBAR");
+        fs::write(env_path, "test contents")?;
+        let pwd = Some(dir.path().to_str().unwrap());
+
+        let highlighter = Highlighter::new(&test_config())?;
+        let env_var_style = resolve_static_style(ENVIRONMENT_VARIABLE, &highlighter.theme).unwrap();
+
+        let highlighted = highlighter.highlight(r"ls test.txt$FOOBAR", pwd, |_| true)?;
+        assert_eq!(
+            highlighted,
+            vec![
+                Span {
+                    start: 0,
+                    end: 2,
+                    style: SpanStyle::Dynamic(DynamicStyle::Callable {
+                        parsed_callable: "ls".to_string()
+                    })
+                },
+                Span {
+                    start: 11,
+                    end: 18,
+                    style: SpanStyle::Static(env_var_style.clone())
+                }
+            ]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn path_with_command_substitution() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let test_path = dir.path().join("test.txt");
+        fs::write(test_path, "test contents")?;
+        let env_path = dir.path().join("test.txtFOOBAR");
+        fs::write(env_path, "test contents")?;
+        let pwd = Some(dir.path().to_str().unwrap());
+
+        let highlighter = Highlighter::new(&test_config())?;
+        let env_var_style = resolve_static_style(ENVIRONMENT_VARIABLE, &highlighter.theme).unwrap();
+        let dynamic_file_style =
+            resolve_static_style(DYNAMIC_PATH_FILE, &highlighter.theme).unwrap();
+
+        let highlighted = highlighter.highlight(r"ls test.txt$(echo FOOBAR)", pwd, |_| true)?;
+        assert_eq!(
+            highlighted,
+            vec![
+                Span {
+                    start: 0,
+                    end: 2,
+                    style: SpanStyle::Dynamic(DynamicStyle::Callable {
+                        parsed_callable: "ls".to_string()
+                    })
+                },
+                Span {
+                    start: 11,
+                    end: 13,
+                    style: SpanStyle::Static(env_var_style.clone())
+                },
+                Span {
+                    start: 13,
+                    end: 17,
+                    style: SpanStyle::Dynamic(DynamicStyle::Callable {
+                        parsed_callable: "echo".to_string()
+                    })
+                },
+                Span {
+                    start: 24,
+                    end: 25,
+                    style: SpanStyle::Static(env_var_style.clone())
+                }
+            ]
+        );
+
+        let test_path = dir.path().join("FOOBAR");
+        fs::write(test_path, "test contents")?;
+
+        let highlighted = highlighter.highlight(r"ls test.txt$(echo FOOBAR)", pwd, |_| true)?;
+        assert_eq!(
+            highlighted,
+            vec![
+                Span {
+                    start: 0,
+                    end: 2,
+                    style: SpanStyle::Dynamic(DynamicStyle::Callable {
+                        parsed_callable: "ls".to_string()
+                    })
+                },
+                Span {
+                    start: 11,
+                    end: 13,
+                    style: SpanStyle::Static(env_var_style.clone())
+                },
+                Span {
+                    start: 13,
+                    end: 17,
+                    style: SpanStyle::Dynamic(DynamicStyle::Callable {
+                        parsed_callable: "echo".to_string()
+                    })
+                },
+                Span {
+                    start: 18,
+                    end: 24,
+                    style: SpanStyle::Static(dynamic_file_style.clone())
+                },
+                Span {
+                    start: 24,
+                    end: 25,
+                    style: SpanStyle::Static(env_var_style.clone())
+                }
+            ]
+        );
+
+        let test2_path = dir.path().join("test2.txt");
+        fs::write(test2_path, "test contents")?;
+
+        let highlighted =
+            highlighter.highlight(r"ls test.txt test.txt$(echo FOOBAR) test2.txt", pwd, |_| {
+                true
+            })?;
+        assert_eq!(
+            highlighted,
+            vec![
+                Span {
+                    start: 0,
+                    end: 2,
+                    style: SpanStyle::Dynamic(DynamicStyle::Callable {
+                        parsed_callable: "ls".to_string()
+                    })
+                },
+                Span {
+                    start: 3,
+                    end: 11,
+                    style: SpanStyle::Static(dynamic_file_style.clone())
+                },
+                Span {
+                    start: 20,
+                    end: 22,
+                    style: SpanStyle::Static(env_var_style.clone())
+                },
+                Span {
+                    start: 22,
+                    end: 26,
+                    style: SpanStyle::Dynamic(DynamicStyle::Callable {
+                        parsed_callable: "echo".to_string()
+                    })
+                },
+                Span {
+                    start: 27,
+                    end: 33,
+                    style: SpanStyle::Static(dynamic_file_style.clone())
+                },
+                Span {
+                    start: 33,
+                    end: 34,
+                    style: SpanStyle::Static(env_var_style.clone())
+                },
+                Span {
+                    start: 35,
+                    end: 44,
+                    style: SpanStyle::Static(dynamic_file_style.clone())
+                },
+            ]
+        );
+
+        Ok(())
     }
 
     /// Both base and mixins are empty

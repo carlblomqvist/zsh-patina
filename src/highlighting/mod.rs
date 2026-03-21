@@ -19,13 +19,17 @@ const DYNAMIC_CALLABLE_FUNCTION: &str = "dynamic.callable.function.shell";
 const DYNAMIC_CALLABLE_MISSING: &str = "dynamic.callable.missing.shell";
 
 const CHARACTER_ESCAPE: &str = "constant.character.escape.shell";
-const TILDE: &str = "variable.language.tilde.shell";
+const TILDE_VARIABLE: &str = "variable.language.tilde.shell";
+const TILDE_META: &str = "meta.group.expansion.tilde";
 
 const STRING_QUOTED_SINGLE: &str = "string.quoted.single.shell";
 const STRING_QUOTED_SINGLE_ANSI: &str = "string.quoted.single.ansi-c.shell";
 const STRING_QUOTED_DOUBLE: &str = "string.quoted.double.shell";
 const STRING_QUOTED_BEGIN: &str = "punctuation.definition.string.begin.shell";
 const STRING_QUOTED_END: &str = "punctuation.definition.string.end.shell";
+
+#[cfg(test)]
+const ENVIRONMENT_VARIABLE: &str = "variable.other.readwrite.shell";
 
 /// A span of text with a foreground color. The range is specified in terms of
 /// character indices, not byte indices.
