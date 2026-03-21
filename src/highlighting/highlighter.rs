@@ -16,7 +16,7 @@ use syntect::{
 use super::*;
 use crate::{
     HighlightingConfig,
-    highlighting::dynamic::DynamicTokenGroupBuilder,
+    highlighting::dynamic::{DynamicScopes, DynamicTokenGroupBuilder},
     theme::{ScopeMapping, Theme, ThemeSource},
 };
 
@@ -122,7 +122,7 @@ pub struct Highlighter {
     scope_mapping: ScopeMapping,
     syntect_theme: SyntectTheme,
     callable_choices: Vec<(String, StaticStyle)>,
-    dynamic_token_group_builder: DynamicTokenGroupBuilder,
+    dynamic_scopes: DynamicScopes,
 }
 
 impl Highlighter {
@@ -181,7 +181,7 @@ impl Highlighter {
             scope_mapping,
             syntect_theme,
             callable_choices,
-            dynamic_token_group_builder: DynamicTokenGroupBuilder::new(),
+            dynamic_scopes: DynamicScopes::new(),
         })
     }
 
@@ -228,17 +228,22 @@ impl Highlighter {
         let syntect_highlighter = SyntectHighlighter::new(&self.syntect_theme);
         let mut highlight_state = HighlightState::new(&syntect_highlighter, ScopeStack::new());
 
+        let mut dynamic_builder = DynamicTokenGroupBuilder::new(self.dynamic_scopes);
+        let mut mixins = Vec::new();
+
         let mut i = 0;
+        let mut byte_offset = 0;
         let mut result = Vec::new();
         for line in LinesWithEndings::from(command.trim_ascii_end()) {
             if line.len() > self.max_line_length {
                 // skip lines that are too long
+                byte_offset += line.len();
                 continue;
             }
 
             if start.elapsed() > self.timeout {
                 // stop if highlighting takes too long
-                break;
+                return Ok(result);
             }
 
             let ops = parse_state.parse_line(line, &self.syntax_set)?;
@@ -266,18 +271,28 @@ impl Highlighter {
 
             // highlight all groups
             if let Some(pwd) = pwd {
-                let mut mixins = Vec::new();
-                for g in self.dynamic_token_group_builder.build(&ops, line.len()) {
-                    if let Ok(group_spans) = g.highlight(line, pwd, &self.theme) {
+                for g in dynamic_builder.build(&ops, byte_offset) {
+                    if let Ok(group_spans) = g.highlight(command, pwd, &self.theme) {
                         mixins.extend(group_spans);
                     }
                 }
+            }
 
-                // mix into result
-                if !mixins.is_empty() {
-                    result = mix_spans(result, mixins);
+            byte_offset += line.len();
+        }
+
+        // highlight remaining groups
+        if let Some(pwd) = pwd {
+            for g in dynamic_builder.finish(byte_offset) {
+                if let Ok(group_spans) = g.highlight(command, pwd, &self.theme) {
+                    mixins.extend(group_spans);
                 }
             }
+        }
+
+        // mix into result
+        if !mixins.is_empty() {
+            result = mix_spans(result, mixins);
         }
 
         Ok(result)
@@ -1578,6 +1593,68 @@ mod tests {
                     start: 25,
                     end: 30,
                     style: dynamic_string_file_style.clone(),
+                }
+            ]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn multiline() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let test_path = dir.path().join("test.txt");
+        fs::write(test_path, "test contents")?;
+        let pwd = Some(dir.path().to_str().unwrap());
+
+        let highlighter = Highlighter::new(&test_config())?;
+        let parameter_style = resolve_static_style(PARAMETER, &highlighter.theme).unwrap();
+        let dynamic_file_style =
+            resolve_static_style(DYNAMIC_PATH_FILE, &highlighter.theme).unwrap();
+        let string_style = resolve_static_style(STRING_QUOTED_DOUBLE, &highlighter.theme).unwrap();
+        let operator_style = resolve_static_style(OPERATOR_LOGICAL, &highlighter.theme).unwrap();
+
+        let highlighted = highlighter.highlight(
+            "git commit -m \"This is\na multi-line commit\nmessage\" && touch test.txt",
+            pwd,
+            |_| true,
+        )?;
+        assert_eq!(
+            highlighted,
+            vec![
+                Span {
+                    start: 0,
+                    end: 3,
+                    style: SpanStyle::Dynamic(DynamicStyle::Callable {
+                        parsed_callable: "git".to_string()
+                    })
+                },
+                Span {
+                    start: 10,
+                    end: 13,
+                    style: SpanStyle::Static(parameter_style.clone()),
+                },
+                Span {
+                    start: 14,
+                    end: 51,
+                    style: SpanStyle::Static(string_style.clone()),
+                },
+                Span {
+                    start: 52,
+                    end: 54,
+                    style: SpanStyle::Static(operator_style.clone()),
+                },
+                Span {
+                    start: 55,
+                    end: 60,
+                    style: SpanStyle::Dynamic(DynamicStyle::Callable {
+                        parsed_callable: "touch".to_string()
+                    })
+                },
+                Span {
+                    start: 61,
+                    end: 69,
+                    style: SpanStyle::Static(dynamic_file_style.clone()),
                 }
             ]
         );

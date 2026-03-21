@@ -259,7 +259,8 @@ impl DynamicTokenGroup {
     }
 }
 
-pub struct DynamicTokenGroupBuilder {
+#[derive(Clone, Copy)]
+pub struct DynamicScopes {
     arguments_scope: Scope,
     callable_scope: Scope,
     character_escape_scope: Scope,
@@ -272,7 +273,7 @@ pub struct DynamicTokenGroupBuilder {
     tilde_meta_scope: Scope,
 }
 
-impl DynamicTokenGroupBuilder {
+impl DynamicScopes {
     pub fn new() -> Self {
         let arguments_scope = Scope::new(ARGUMENTS).unwrap();
         let callable_scope = Scope::new(CALLABLE).unwrap();
@@ -297,108 +298,123 @@ impl DynamicTokenGroupBuilder {
             tilde_meta_scope,
         }
     }
+}
 
-    pub fn build(&self, ops: &[(usize, ScopeStackOp)], line_len: usize) -> Vec<DynamicTokenGroup> {
-        struct TemporaryGroup {
-            dynamic_type: DynamicType,
-            current_scope: Vec<DynamicScope>,
-            current_start: usize,
-            tokens: Vec<DynamicToken>,
+struct TemporaryGroup {
+    dynamic_type: DynamicType,
+    current_scope: Vec<DynamicScope>,
+    current_start: usize,
+    tokens: Vec<DynamicToken>,
+}
+
+pub struct DynamicTokenGroupBuilder {
+    scopes: DynamicScopes,
+    stack: Vec<Scope>,
+    stash: Vec<Vec<Scope>>,
+    group_stack: Vec<TemporaryGroup>,
+    group_stash: Vec<Vec<TemporaryGroup>>,
+    character_escape_buf: Vec<DynamicToken>,
+}
+
+impl DynamicTokenGroupBuilder {
+    pub fn new(scopes: DynamicScopes) -> Self {
+        Self {
+            scopes,
+            stack: Vec::new(),
+            stash: Vec::new(),
+            group_stack: Vec::new(),
+            group_stash: Vec::new(),
+            character_escape_buf: Vec::new(),
+        }
+    }
+
+    fn on_pop(&mut self, i: usize, result: &mut Vec<DynamicTokenGroup>) {
+        let scope = self.stack.pop().unwrap();
+        if let Some(current_group) = self.group_stack.last_mut()
+            && (scope == self.scopes.arguments_scope
+                || scope == self.scopes.callable_scope
+                || scope == self.scopes.character_escape_scope
+                || scope == self.scopes.string_quoted_begin_scope
+                || scope == self.scopes.string_quoted_end_scope
+                || scope == self.scopes.string_quoted_single_scope
+                || scope == self.scopes.string_quoted_sigle_ansi_scope
+                || scope == self.scopes.string_quoted_double_scope
+                || scope == self.scopes.tilde_variable_scope
+                || current_group.current_scope.last() == Some(&DynamicScope::PoisonPill))
+        {
+            if let Some(current_scope) = current_group.current_scope.pop()
+                && i != current_group.current_start
+            {
+                current_group.tokens.push(DynamicToken::new(
+                    current_group.current_start..i,
+                    current_scope,
+                ));
+            }
+            current_group.current_start = i;
+        } else if !self.group_stack.is_empty() && scope == self.scopes.tilde_meta_scope {
+            // this can be ignored - tilde will be caught by
+            // `tilde_variable_scope`
+        } else if self.group_stack.is_empty()
+            && scope == self.scopes.character_escape_scope
+            && let Some(ce) = self.character_escape_buf.last_mut()
+        {
+            ce.byte_range.end = i;
         }
 
-        fn on_pop(
-            builder: &DynamicTokenGroupBuilder,
-            stack: &mut Vec<&Scope>,
-            group_stack: &mut Vec<TemporaryGroup>,
-            character_escape_buf: &mut [DynamicToken],
-            i: usize,
-            result: &mut Vec<DynamicTokenGroup>,
-        ) {
-            let scope = stack.pop().unwrap();
-            if let Some(current_group) = group_stack.last_mut()
-                && (*scope == builder.arguments_scope
-                    || *scope == builder.callable_scope
-                    || *scope == builder.character_escape_scope
-                    || *scope == builder.string_quoted_begin_scope
-                    || *scope == builder.string_quoted_end_scope
-                    || *scope == builder.string_quoted_single_scope
-                    || *scope == builder.string_quoted_sigle_ansi_scope
-                    || *scope == builder.string_quoted_double_scope
-                    || *scope == builder.tilde_variable_scope
-                    || current_group.current_scope.last() == Some(&DynamicScope::PoisonPill))
-            {
-                if let Some(current_scope) = current_group.current_scope.pop()
-                    && i != current_group.current_start
-                {
-                    current_group.tokens.push(DynamicToken::new(
-                        current_group.current_start..i,
-                        current_scope,
-                    ));
-                }
-                current_group.current_start = i;
-            } else if !group_stack.is_empty() && *scope == builder.tilde_meta_scope {
-                // this can be ignored - tilde will be caught by
-                // `tilde_variable_scope`
-            } else if group_stack.is_empty()
-                && *scope == builder.character_escape_scope
-                && let Some(ce) = character_escape_buf.last_mut()
-            {
-                ce.byte_range.end = i;
-            }
-
-            if (*scope == builder.arguments_scope || *scope == builder.callable_scope)
-                && let Some(g) = group_stack.pop()
-                && !g.tokens.is_empty()
-            {
-                result.push(DynamicTokenGroup {
-                    dynamic_type: g.dynamic_type,
-                    tokens: g.tokens,
-                });
-            }
+        if (scope == self.scopes.arguments_scope || scope == self.scopes.callable_scope)
+            && let Some(g) = self.group_stack.pop()
+            && !g.tokens.is_empty()
+        {
+            result.push(DynamicTokenGroup {
+                dynamic_type: g.dynamic_type,
+                tokens: g.tokens,
+            });
         }
+    }
 
-        let mut stack = Vec::new();
-        let mut stash = Vec::new();
-
-        let mut group_stack = Vec::new();
-        let mut group_stash = Vec::new();
-
-        let mut character_escape_buf: Vec<DynamicToken> = Vec::new();
-
+    pub fn build(
+        &mut self,
+        ops: &[(usize, ScopeStackOp)],
+        offset: usize,
+    ) -> Vec<DynamicTokenGroup> {
         let mut result = Vec::new();
 
         for (i, s) in ops {
+            let i = i + offset;
+
             match s {
                 ScopeStackOp::Push(scope) => {
-                    if *scope == self.arguments_scope {
-                        group_stack.push(TemporaryGroup {
+                    if *scope == self.scopes.arguments_scope {
+                        self.group_stack.push(TemporaryGroup {
                             dynamic_type: DynamicType::Arguments,
                             current_scope: vec![DynamicScope::Arguments],
-                            current_start: *i,
+                            current_start: i,
                             tokens: Vec::new(),
                         });
-                    } else if *scope == self.callable_scope {
-                        if let Some(l) = character_escape_buf.last()
-                            && l.byte_range.end != *i
+                    } else if *scope == self.scopes.callable_scope {
+                        if let Some(l) = self.character_escape_buf.last()
+                            && l.byte_range.end != i
                         {
-                            character_escape_buf.clear();
+                            self.character_escape_buf.clear();
                         }
-                        group_stack.push(TemporaryGroup {
+                        self.group_stack.push(TemporaryGroup {
                             dynamic_type: DynamicType::Callable,
                             current_scope: vec![DynamicScope::Callable],
-                            current_start: *i,
-                            tokens: std::mem::take(&mut character_escape_buf),
+                            current_start: i,
+                            tokens: std::mem::take(&mut self.character_escape_buf),
                         });
-                    } else if group_stack.is_empty() && *scope == self.character_escape_scope {
-                        if let Some(l) = character_escape_buf.last()
-                            && l.byte_range.end != *i
+                    } else if self.group_stack.is_empty()
+                        && *scope == self.scopes.character_escape_scope
+                    {
+                        if let Some(l) = self.character_escape_buf.last()
+                            && l.byte_range.end != i
                         {
-                            character_escape_buf.clear();
+                            self.character_escape_buf.clear();
                         }
-                        character_escape_buf
-                            .push(DynamicToken::new(*i..*i, DynamicScope::CharacterEscape));
-                    } else if let Some(current_group) = group_stack.last_mut() {
-                        let new_dynamic_scope = if *scope == self.character_escape_scope {
+                        self.character_escape_buf
+                            .push(DynamicToken::new(i..i, DynamicScope::CharacterEscape));
+                    } else if let Some(current_group) = self.group_stack.last_mut() {
+                        let new_dynamic_scope = if *scope == self.scopes.character_escape_scope {
                             if current_group
                                 .current_scope
                                 .contains(&DynamicScope::StringQuotedSingleAnsi)
@@ -407,18 +423,18 @@ impl DynamicTokenGroupBuilder {
                             } else {
                                 DynamicScope::CharacterEscape
                             }
-                        } else if *scope == self.string_quoted_begin_scope {
+                        } else if *scope == self.scopes.string_quoted_begin_scope {
                             DynamicScope::StringQuotedBegin
-                        } else if *scope == self.string_quoted_end_scope {
+                        } else if *scope == self.scopes.string_quoted_end_scope {
                             DynamicScope::StringQuotedEnd
-                        } else if *scope == self.string_quoted_single_scope {
+                        } else if *scope == self.scopes.string_quoted_single_scope {
                             DynamicScope::StringQuotedSingle
-                        } else if *scope == self.string_quoted_sigle_ansi_scope {
+                        } else if *scope == self.scopes.string_quoted_sigle_ansi_scope {
                             DynamicScope::StringQuotedSingleAnsi
-                        } else if *scope == self.string_quoted_double_scope {
+                        } else if *scope == self.scopes.string_quoted_double_scope {
                             DynamicScope::StringQuotedDouble
-                        } else if *scope == self.tilde_variable_scope
-                            || *scope == self.tilde_meta_scope
+                        } else if *scope == self.scopes.tilde_variable_scope
+                            || *scope == self.scopes.tilde_meta_scope
                         {
                             DynamicScope::Tilde
                         } else {
@@ -429,29 +445,22 @@ impl DynamicTokenGroupBuilder {
                         };
 
                         if let Some(current_scope) = current_group.current_scope.last()
-                            && *i != current_group.current_start
+                            && i != current_group.current_start
                         {
                             current_group.tokens.push(DynamicToken::new(
-                                current_group.current_start..*i,
+                                current_group.current_start..i,
                                 *current_scope,
                             ));
                         }
                         current_group.current_scope.push(new_dynamic_scope);
-                        current_group.current_start = *i;
+                        current_group.current_start = i;
                     }
-                    stack.push(scope);
+                    self.stack.push(*scope);
                 }
 
                 ScopeStackOp::Pop(count) => {
                     for _ in 0..*count {
-                        on_pop(
-                            self,
-                            &mut stack,
-                            &mut group_stack,
-                            &mut character_escape_buf,
-                            *i,
-                            &mut result,
-                        );
+                        self.on_pop(i, &mut result);
                     }
                 }
 
@@ -459,30 +468,30 @@ impl DynamicTokenGroupBuilder {
                     // similar to ::Pop, but store popped items in stash so
                     // we can restore them if necessary
                     let count = match *clear_amount {
-                        ClearAmount::TopN(n) => n.min(stack.len()),
-                        ClearAmount::All => stack.len(),
+                        ClearAmount::TopN(n) => n.min(self.stack.len()),
+                        ClearAmount::All => self.stack.len(),
                     };
 
                     let mut to_stash = Vec::new();
                     let mut to_group_stash = Vec::new();
                     for _ in 0..count {
-                        to_stash.push(stack.pop().unwrap());
-                        to_group_stash.push(group_stack.pop().unwrap());
+                        to_stash.push(self.stack.pop().unwrap());
+                        to_group_stash.push(self.group_stack.pop().unwrap());
                     }
-                    stash.push(to_stash);
-                    group_stash.push(to_group_stash);
+                    self.stash.push(to_stash);
+                    self.group_stash.push(to_group_stash);
                 }
 
                 ScopeStackOp::Restore => {
                     // restore items from the stash (see ::Clear)
-                    if let Some(mut s) = stash.pop() {
+                    if let Some(mut s) = self.stash.pop() {
                         while let Some(e) = s.pop() {
-                            stack.push(e);
+                            self.stack.push(e);
                         }
                     }
-                    if let Some(mut s) = group_stash.pop() {
+                    if let Some(mut s) = self.group_stash.pop() {
                         while let Some(g) = s.pop() {
-                            group_stack.push(g);
+                            self.group_stack.push(g);
                         }
                     }
                 }
@@ -491,22 +500,21 @@ impl DynamicTokenGroupBuilder {
             }
         }
 
+        result
+    }
+
+    pub fn finish(mut self, end: usize) -> Vec<DynamicTokenGroup> {
+        let mut result = Vec::new();
+
         // consume the remaining items on the stack
-        while !stack.is_empty() {
-            on_pop(
-                self,
-                &mut stack,
-                &mut group_stack,
-                &mut character_escape_buf,
-                line_len,
-                &mut result,
-            );
+        while !self.stack.is_empty() {
+            self.on_pop(end, &mut result);
         }
 
-        if !character_escape_buf.is_empty() {
+        if !self.character_escape_buf.is_empty() {
             result.push(DynamicTokenGroup {
                 dynamic_type: DynamicType::Unknown,
-                tokens: character_escape_buf,
+                tokens: self.character_escape_buf,
             });
         }
 

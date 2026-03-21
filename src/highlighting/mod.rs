@@ -30,6 +30,10 @@ const STRING_QUOTED_END: &str = "punctuation.definition.string.end.shell";
 
 #[cfg(test)]
 const ENVIRONMENT_VARIABLE: &str = "variable.other.readwrite.shell";
+#[cfg(test)]
+const PARAMETER: &str = "variable.parameter.option.shell";
+#[cfg(test)]
+const OPERATOR_LOGICAL: &str = "keyword.operator.logical.and.shell";
 
 /// A span of text with a foreground color. The range is specified in terms of
 /// character indices, not byte indices.
