@@ -4,13 +4,13 @@
 
 The plugin spawns a small background daemon written in Rust. The daemon is shared between Zsh sessions and caches the syntax definition and color theme. Typical commands are highlighted in **less than a millisecond**. Extremely long commands only take a few milliseconds.
 
-Internally, the plugin relies on [syntect](https://github.com/trishume/syntect/), which provides **high-quality syntax highlighting** based on [Sublime Text](https://www.sublimetext.com/) syntax definitions. The default built-in [theme](#theming) uses the eight ANSI colors and is compatible with all terminal emulators.
+Internally, the plugin relies on [syntect](https://github.com/trishume/syntect/), which provides **high-quality syntax highlighting** based on [Sublime Text](https://www.sublimetext.com/) syntax definitions. With this, you get a similar experience to editing code in your IDE. The default built-in [theme](#theming) uses the eight ANSI colors and is compatible with all terminal emulators.
 
-In contrast to other Zsh syntax highlighters (e.g. [zsh-syntax-highlighting](https://github.com/zsh-users/zsh-syntax-highlighting/) or [fast-syntax-highlighting](https://github.com/zdharma-continuum/fast-syntax-highlighting)), which use different colors to indicate whether a command or a directory/file exists, zsh-patina performs **static highlighting that solely depends on the characters you enter**. This way, you get a similar experience to editing code in your IDE.
+Besides normal static highlighting, zsh-patina is able to dynamically detect whether a command you entered is valid and can be executed and if the arguments refer to existing files or directories. By default, **invalid commands are shown in red** and **existing files/directories are underlined**. If you want, you can disable dynamic highlighting in the [configuration](#configuration) or change the styling in a [custom theme](#creating-a-custom-theme).
 
 ## Examples
 
-<img src="https://raw.githubusercontent.com/michel-kraemer/zsh-patina/19d811a1f8af94161871b9cf1e0d8302a032c873/.github/screenshot.png" alt="Screenshot" />
+<img src="https://raw.githubusercontent.com/michel-kraemer/zsh-patina/4052ba10fcd79c2c7b1d558bad8037affc8077c0/.github/screenshot.png" alt="Screenshot" />
 
 ## How to install
 
@@ -26,7 +26,7 @@ In contrast to other Zsh syntax highlighters (e.g. [zsh-syntax-highlighting](htt
 2. Initialize the plugin at the end of your `.zshrc` file:
 
    ```shell
-   echo "eval \"\$($(brew --prefix)/bin/zsh-patina activate)\"" >> $HOME/.zshrc
+   echo "eval \"\$($(brew --prefix)/bin/zsh-patina activate)\"" >> ~/.zshrc
    ```
 
 3. Restart your terminal, or run:
@@ -46,7 +46,7 @@ In contrast to other Zsh syntax highlighters (e.g. [zsh-syntax-highlighting](htt
 2. Initialize the plugin at the end of your `.zshrc` file:
 
    ```shell
-   echo 'eval "$(~/.cargo/bin/zsh-patina activate)"' >> $HOME/.zshrc
+   echo 'eval "$(~/.cargo/bin/zsh-patina activate)"' >> ~/.zshrc
    ```
 
 3. Restart your terminal, or run:
@@ -78,7 +78,7 @@ zinit light michel-kraemer/zsh-patina
 3. Initialize the plugin at the end of your `.zshrc` file:
 
    ```shell
-   echo 'eval "$(~/.zsh-patina/zsh-patina activate)"' >> $HOME/.zshrc
+   echo 'eval "$(~/.zsh-patina/zsh-patina activate)"' >> ~/.zshrc
    ```
 
 4. Restart your terminal, or run:
@@ -94,20 +94,20 @@ zinit light michel-kraemer/zsh-patina
 1. Clone the repository:
 
    ```shell
-   git clone https://github.com/michel-kraemer/zsh-patina.git $HOME/.zsh-patina
+   git clone https://github.com/michel-kraemer/zsh-patina.git ~/.zsh-patina
    ```
 
 2. Build the plugin:
 
    ```shell
-   cd $HOME/.zsh-patina
+   cd ~/.zsh-patina
    cargo build --release
    ```
 
 3. Initialize the plugin at the end of your `.zshrc` file:
 
    ```shell
-   echo 'eval "$(~/.zsh-patina/target/release/zsh-patina activate)"' >> $HOME/.zshrc
+   echo 'eval "$(~/.zsh-patina/target/release/zsh-patina activate)"' >> ~/.zshrc
    ```
 
 4. Restart your terminal, or run:
@@ -124,6 +124,16 @@ zsh-patina can be configured through an optional configuration file at `~/.confi
 
 ```toml
 [highlighting]
+# Either the name of a built-in theme (e.g. `"simple"`, `"patina"`) or a string
+# in the form `"file:/path/mytheme.toml"` pointing to a custom theme toml file.
+theme = "patina"
+
+# Enable or disable dynamic highlighting. Can be `true` or `false` ...
+dynamic = true
+
+# ... or a table with the keys `callables` and `paths`.
+# dynamic = { callables = true, paths = true }
+
 # For performance reasons, highlighting is disabled for very long lines. This
 # option specifies the maximum length of a line (in bytes) up to which
 # highlighting is applied.
@@ -147,7 +157,7 @@ zsh-patina restart
 
 ## Theming
 
-zsh-patina supports custom syntax highlighting themes. You can choose one of the built-in themes or create your own.
+zsh-patina supports custom syntax highlighting themes. You can choose from one of the built-in themes or create your own.
 
 Note that after changing the `theme` setting or editing your custom theme file, as described [above](#configuration), you need to restart the daemon so the new colors are applied.
 
@@ -215,7 +225,7 @@ ANSI color names use your terminal's color scheme, so the actual appearance depe
 
 ### Styles
 
-A style is a struct with a foreground color and an optional background color. In addition, you can specify if text should be shown in bold or underlined.
+A style is a struct with a foreground color and a background color (both are optional). In addition, you can specify if text should be shown in bold or underlined.
 
 For example:
 
@@ -253,6 +263,45 @@ You can also use the `tokenize` subcommand to inspect which scopes are assigned 
 
 ```shell
 echo 'for i in 1 2 3; do echo $i; done' | zsh-patina tokenize
+```
+
+### Dynamic scopes
+
+zsh-patina dynamically highlights commands, files, and directories based on whether they exist and are accessible. The styles used for this can be controlled with the following scopes:
+
+```toml
+# General scope for everything this is callable
+"dynamic.callable" = "cyan"
+
+# This style will be applied to aliases, commands, etc. that are not executable
+"dynamic.callable.missing" = "red"
+
+# This style will be applied to existing files/directories
+"dynamic.path" = { underline = true }
+
+# Optional fine-grained scopes for each individual callable
+"dynamic.callable.alias" = "cyan"
+"dynamic.callable.builtin" = "cyan"
+"dynamic.callable.command" = "cyan"
+"dynamic.callable.function" = "cyan"
+```
+
+The styles of the dynamic scopes are *mixed into* the normal styles, which means, first the normal styles are applied, and then every attribute of the dynamic style overwrites the normal style's attribute with the same name. For example, if `variable.function.shell` (the normal style for callables if dynamic highlighting is disabled) specifies that a callable should be highlighted in blue, and `dynamic.callable.command.shell` specifies `underline = true`, then any command that exists and can be executed will be highlighted in blue *and* underlined.
+
+### Extending another theme
+
+If you want your custom theme to extend an existing one (either a built-in theme or another custom file), you can use the `extends` property in the `metadata` table. Please note that due to the way TOML files are structured, the metadata table must be placed the end of the file. For example:
+
+```toml
+# Override just the scopes you want to change:
+"comment" = "red"
+
+[metadata]
+# extend the built-in nord theme
+extends = "nord"
+
+# ... or extend another custom theme
+# extends = "file:/path/to/another/theme.toml"
 ```
 
 ## How to remove the plugin
