@@ -304,6 +304,24 @@ extends = "nord"
 # extends = "file:/path/to/another/theme.toml"
 ```
 
+## Benchmarks
+
+Here are the results from benchmarks I ran to compare the performance of zsh-patina with that of [zsh-syntax-highlighting](https://github.com/zsh-users/zsh-syntax-highlighting) and [fast-syntax-highlighting](https://github.com/zdharma-continuum/fast-syntax-highlighting). The benchmarks were executed with [zsh-bench](https://github.com/romkatv/zsh-bench).
+
+&nbsp; | zsh-patina | zsh-syntax-highlighting | fast-syntax-highlighting
+-|-|-|-
+first_prompt_lag_ms | **19.741** | 22.166 | 25.785
+first_command_lag_ms | **28.239** | 30.507 | 28.295
+command_lag_ms |  0.281 | 0.585 | **0.220**
+input_lag_ms | **1.256** | 9.777 | 3.159
+exit_time_ms | **16.779** | 20.262 | 24.024
+
+Fastest times are displayed in **bold**. I'm not really sure why fast-syntax-highlighting is faster in `command_lag_ms` (the time it takes the command line to appear after pressing Enter), but I guess 61µs (a fraction of a millisecond) is within the margin of error.
+
+**Setup:** I ran the benchmarks with a clean Zsh configuration. The only thing that was included in the `.zshrc` file was the code required to initialize the individual plugins. I ran all benchmarks 5 times to make sure the numbers are consistent. I have copied the results from the fastest run for each plugin here. The benchmarks were executed on a MacBook Pro 16″ 2023.
+
+**Disclaimer:** Benchmarks are hard and the numbers may be different on other systems, so take these results with a grain of salt. You may want to run zsh-bench on your own system and with your own setup.
+
 ## How to remove the plugin
 
 In the unlikely case you don't like zsh-patina ☹️, you can remove it as follows (note that these instructions assume you've installed the plugin in `~/.zsh-patina`):
