@@ -34,8 +34,13 @@ _zsh_patina_resolve_callable() {
     done
 
     if (( ${#seen} )); then
-        # followed at least one alias — check the type of the final target
-        if (( $+functions[(e)$word] || $+builtins[(e)$word] || $+commands[(e)$word] )); then
+        # We've resolved an alias. Check whether it is a function, builtin, or
+        # command. Otherwise, check if it is executable (an executable file or
+        # directory). This is consistent with how the daemon checks for existing
+        # callables. Paths without slashes don't need to be checked as they
+        # should already be contained in $commands)
+        if (( $+functions[(e)$word] || $+builtins[(e)$word] || $+commands[(e)$word] )) ||
+            [[ "$word" == */* && -x "$word" ]]; then
             REPLY=a
         else
             REPLY=m
