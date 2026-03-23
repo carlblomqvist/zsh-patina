@@ -5,7 +5,7 @@
 "comment" = "black"
 
 # strings
-"string" = "yellow"
+"string.quoted" = "yellow"
 
 # regular expressions
 "keyword.operator.regexp" = { foreground = "blue", bold = true }
@@ -20,7 +20,7 @@
 "variable.parameter" = "cyan"
 
 # environment variables
-"variable.other" = "#87d75f"
+"variable.other.readwrite.shell" = "#87d75f"
 "punctuation.definition.variable" = "#87d75f"
 
 # commands
@@ -29,11 +29,12 @@
 # home directory ~
 "variable.language.tilde" = "magenta"
 
-# keywords / operators captured by patina
-"keyword" = {}
+# keywords / operators
+"keyword.control" = "yellow"
 
 # variable assignments
-"storage" = {}
+"storage.modifier" = "green"
+"variable.other.readwrite.assignment" = {}
 
 # support terms
 "support" = "green"
