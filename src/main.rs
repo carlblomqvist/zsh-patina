@@ -16,7 +16,7 @@ use crate::{
     check::check_config,
     config::Config,
     daemon::{activate, start_daemon, status_daemon, stop_daemon},
-    highlighting::{Highlighter, Token},
+    highlighting::{HighlighterBuilder, Token},
     theme::Theme,
 };
 
@@ -103,7 +103,7 @@ fn tokenize(config: &Config, input_file: &Option<String>) -> Result<()> {
     };
 
     // tokenize
-    let highlighter = Highlighter::new(&config.highlighting)?;
+    let highlighter = HighlighterBuilder::new(&config.highlighting).build()?;
     let tokens = highlighter.tokenize(&input)?;
 
     // join consecutive tokens

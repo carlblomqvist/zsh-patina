@@ -3,7 +3,7 @@ use std::ops::Range;
 mod dynamic;
 mod highlighter;
 
-pub use highlighter::Highlighter;
+pub use highlighter::{Highlighter, HighlighterBuilder};
 
 use crate::theme::Theme;
 

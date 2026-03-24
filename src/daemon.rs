@@ -17,7 +17,7 @@ use std::{
 use crate::{
     check::check_config,
     config::Config,
-    highlighting::{DynamicStyle, Highlighter, Span, SpanStyle, StaticStyle},
+    highlighting::{DynamicStyle, Highlighter, HighlighterBuilder, Span, SpanStyle, StaticStyle},
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -574,7 +574,7 @@ fn start_daemon_internal(
     }
 
     // initialize highlighter
-    let highlighter = Arc::new(Highlighter::new(&config.highlighting)?);
+    let highlighter = Arc::new(HighlighterBuilder::new(&config.highlighting).build()?);
 
     // highlight something to make sure everything is loaded
     highlighter.highlight("echo Welcome to zsh-patina!", None, |_| true)?;

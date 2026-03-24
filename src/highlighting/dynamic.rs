@@ -52,18 +52,30 @@ pub struct DynamicTokenGroup {
 }
 
 impl DynamicTokenGroup {
-    pub fn highlight(&self, line: &str, pwd: &str, theme: &Theme) -> Result<Vec<Span>> {
+    pub fn highlight(
+        &self,
+        line: &str,
+        pwd: &str,
+        home_dir: &str,
+        theme: &Theme,
+    ) -> Result<Vec<Span>> {
         match self.dynamic_type {
             DynamicType::Unknown => Ok(Vec::new()), // nothing to do
-            DynamicType::Callable => self.highlight_callable(line, pwd, theme),
-            DynamicType::Arguments => self.highlight_arguments(line, pwd, theme),
+            DynamicType::Callable => self.highlight_callable(line, pwd, home_dir, theme),
+            DynamicType::Arguments => self.highlight_arguments(line, pwd, home_dir, theme),
         }
     }
 
-    fn highlight_callable(&self, line: &str, pwd: &str, theme: &Theme) -> Result<Vec<Span>> {
+    fn highlight_callable(
+        &self,
+        line: &str,
+        pwd: &str,
+        home_dir: &str,
+        theme: &Theme,
+    ) -> Result<Vec<Span>> {
         let mut result = Vec::new();
 
-        let parsed = self.parse(line)?;
+        let parsed = self.parse(line, home_dir)?;
         for (p, range) in parsed.into_iter().take(1) {
             let span_style = if p.contains('/') && is_path_executable(&p, pwd) {
                 if let Some(style) = resolve_static_style(DYNAMIC_CALLABLE_COMMAND, theme) {
@@ -89,10 +101,16 @@ impl DynamicTokenGroup {
         Ok(result)
     }
 
-    fn highlight_arguments(&self, line: &str, pwd: &str, theme: &Theme) -> Result<Vec<Span>> {
+    fn highlight_arguments(
+        &self,
+        line: &str,
+        pwd: &str,
+        home_dir: &str,
+        theme: &Theme,
+    ) -> Result<Vec<Span>> {
         let mut result = Vec::new();
 
-        let parsed = self.parse(line)?;
+        let parsed = self.parse(line, home_dir)?;
         for (p, range) in parsed {
             if let Some(t) = path_type(&p, pwd) {
                 let dynamic_scope = match t {
@@ -112,12 +130,13 @@ impl DynamicTokenGroup {
         Ok(result)
     }
 
-    fn parse(&self, line: &str) -> Result<Vec<(String, Range<usize>)>> {
+    fn parse(&self, line: &str, home_dir: &str) -> Result<Vec<(String, Range<usize>)>> {
         if self.tokens.is_empty() {
             return Ok(Vec::new());
         }
 
-        struct State {
+        struct State<'a> {
+            home_dir: &'a str,
             s: String,
             start: usize,
             end: usize,
@@ -127,7 +146,7 @@ impl DynamicTokenGroup {
             result: Vec<(String, Range<usize>)>,
         }
 
-        impl State {
+        impl State<'_> {
             fn flush_utf8(&mut self) -> Result<()> {
                 if !self.utf8_buf.is_empty() {
                     let decoded = std::str::from_utf8(&self.utf8_buf).with_context(|| {
@@ -144,12 +163,7 @@ impl DynamicTokenGroup {
                     // resolve tilde only if the whole string is a tilde or if it starts
                     // with '~/', because '~foobar', for example, should not be resolved
                     if self.resolve_tilde && (self.s == "~" || self.s.starts_with("~/")) {
-                        let home = dirs::home_dir().context("Unable to find home directory")?;
-                        self.s.replace_range(
-                            0..1,
-                            home.to_str()
-                                .context("Unable to convert home directory to string")?,
-                        );
+                        self.s.replace_range(0..1, self.home_dir);
                     }
 
                     self.result
@@ -167,6 +181,7 @@ impl DynamicTokenGroup {
 
         let chars_count = line[0..self.tokens[0].byte_range.start].chars().count();
         let mut state = State {
+            home_dir,
             s: String::new(),
             start: chars_count,
             end: chars_count,

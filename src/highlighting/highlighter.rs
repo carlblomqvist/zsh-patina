@@ -114,7 +114,39 @@ fn mix_styles(base: &SpanStyle, mixin: &SpanStyle) -> SpanStyle {
     }
 }
 
+pub struct HighlighterBuilder<'a> {
+    config: &'a HighlightingConfig,
+    home_dir: Option<String>,
+}
+
+impl<'a> HighlighterBuilder<'a> {
+    pub fn new(config: &'a HighlightingConfig) -> Self {
+        Self {
+            config,
+            home_dir: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn home_dir(mut self, home_dir: String) -> Self {
+        self.home_dir = Some(home_dir);
+        self
+    }
+
+    pub fn build(self) -> Result<Highlighter> {
+        let home_dir = self.home_dir.map(anyhow::Ok).unwrap_or_else(|| {
+            let home = dirs::home_dir().context("Unable to find home directory")?;
+            Ok(home
+                .to_str()
+                .context("Unable to convert home directory to string")?
+                .to_owned())
+        })?;
+        Highlighter::new(self.config, home_dir)
+    }
+}
+
 pub struct Highlighter {
+    home_dir: String,
     max_line_length: usize,
     timeout: Duration,
     dynamic_callables_enabled: bool,
@@ -128,7 +160,7 @@ pub struct Highlighter {
 }
 
 impl Highlighter {
-    pub fn new(config: &HighlightingConfig) -> Result<Self> {
+    pub fn new(config: &HighlightingConfig, home_dir: String) -> Result<Self> {
         let syntax_set: SyntaxSet = syntect::dumps::from_uncompressed_data(include_bytes!(
             concat!(env!("OUT_DIR"), "/syntax_set.packdump")
         ))
@@ -177,6 +209,7 @@ impl Highlighter {
             .collect::<Vec<_>>();
 
         Ok(Self {
+            home_dir,
             max_line_length: config.max_line_length,
             timeout: config.timeout,
             dynamic_callables_enabled: config.dynamic.callables,
@@ -280,7 +313,8 @@ impl Highlighter {
             {
                 for g in dynamic_builder.build(&ops, byte_offset) {
                     if self.should_highlight_dynamic(&g.dynamic_type)
-                        && let Ok(group_spans) = g.highlight(command, pwd, &self.theme)
+                        && let Ok(group_spans) =
+                            g.highlight(command, pwd, &self.home_dir, &self.theme)
                     {
                         mixins.extend(group_spans);
                     }
@@ -296,7 +330,7 @@ impl Highlighter {
         {
             for g in dynamic_builder.finish(byte_offset) {
                 if self.should_highlight_dynamic(&g.dynamic_type)
-                    && let Ok(group_spans) = g.highlight(command, pwd, &self.theme)
+                    && let Ok(group_spans) = g.highlight(command, pwd, &self.home_dir, &self.theme)
                 {
                     mixins.extend(group_spans);
                 }
@@ -486,7 +520,7 @@ mod tests {
     fn echo() -> Result<()> {
         let dir = tempfile::tempdir()?;
         let pwd = Some(dir.path().to_str().unwrap());
-        let highlighter = Highlighter::new(&test_config())?;
+        let highlighter = HighlighterBuilder::new(&test_config()).build()?;
         let highlighted = highlighter.highlight("echo", pwd, |_| true)?;
         assert_eq!(highlighted, vec![dynamic_span(0, 4, "echo")]);
         Ok(())
@@ -501,7 +535,7 @@ mod tests {
         fs::write(dest_path, "test contents")?;
         let pwd = Some(dir.path().to_str().unwrap());
 
-        let highlighter = Highlighter::new(&test_config())?;
+        let highlighter = HighlighterBuilder::new(&test_config()).build()?;
         let dynamic_file_style =
             resolve_static_style(DYNAMIC_PATH_FILE, &highlighter.theme).unwrap();
         let string_style = resolve_static_style(STRING_QUOTED_DOUBLE, &highlighter.theme).unwrap();
@@ -530,7 +564,7 @@ mod tests {
             callables: false,
             paths: false,
         };
-        let highlighter = Highlighter::new(&config)?;
+        let highlighter = HighlighterBuilder::new(&config).build()?;
         let callable_style = resolve_static_style(CALLABLE, &highlighter.theme).unwrap();
 
         let highlighted = highlighter.highlight("ls test.txt", pwd, |_| true)?;
@@ -540,7 +574,7 @@ mod tests {
             callables: true,
             paths: false,
         };
-        let highlighter = Highlighter::new(&config)?;
+        let highlighter = HighlighterBuilder::new(&config).build()?;
 
         let highlighted = highlighter.highlight("ls test.txt", pwd, |_| true)?;
         assert_eq!(highlighted, vec![dynamic_span(0, 2, "ls")]);
@@ -549,7 +583,7 @@ mod tests {
             callables: false,
             paths: true,
         };
-        let highlighter = Highlighter::new(&config)?;
+        let highlighter = HighlighterBuilder::new(&config).build()?;
         let dynamic_file_style =
             resolve_static_style(DYNAMIC_PATH_FILE, &highlighter.theme).unwrap();
 
@@ -575,7 +609,7 @@ mod tests {
         fs::write(test_path1, "test contents")?;
         let pwd = Some(dir.path().to_str().unwrap());
 
-        let highlighter = Highlighter::new(&test_config())?;
+        let highlighter = HighlighterBuilder::new(&test_config()).build()?;
         let dynamic_file_style =
             resolve_static_style(DYNAMIC_PATH_FILE, &highlighter.theme).unwrap();
         let string_style = resolve_static_style(STRING_QUOTED_DOUBLE, &highlighter.theme).unwrap();
@@ -682,7 +716,7 @@ mod tests {
         fs::create_dir(dest_path)?;
         let pwd = Some(dir.path().to_str().unwrap());
 
-        let highlighter = Highlighter::new(&test_config())?;
+        let highlighter = HighlighterBuilder::new(&test_config()).build()?;
         let highlighted = highlighter.highlight("cp test.txt dest", pwd, |_| true)?;
 
         let dynamic_file_style =
@@ -707,8 +741,11 @@ mod tests {
     fn command_with_tilde() -> Result<()> {
         let dir = tempfile::tempdir()?;
         let pwd = Some(dir.path().to_str().unwrap());
+        let home_dir = tempfile::tempdir()?;
 
-        let highlighter = Highlighter::new(&test_config())?;
+        let highlighter = HighlighterBuilder::new(&test_config())
+            .home_dir(home_dir.path().to_str().unwrap().to_owned())
+            .build()?;
         let dynamic_command_style =
             resolve_static_style(DYNAMIC_CALLABLE_COMMAND, &highlighter.theme).unwrap();
 
@@ -740,8 +777,11 @@ mod tests {
         let test_path = dir.path().join("test.txt");
         fs::write(test_path, "test contents")?;
         let pwd = Some(dir.path().to_str().unwrap());
+        let home_dir = tempfile::tempdir()?;
 
-        let highlighter = Highlighter::new(&test_config())?;
+        let highlighter = HighlighterBuilder::new(&test_config())
+            .home_dir(home_dir.path().to_str().unwrap().to_owned())
+            .build()?;
         let tilde_style = resolve_static_style(TILDE_VARIABLE, &highlighter.theme).unwrap();
         let string_style = resolve_static_style(STRING_QUOTED_DOUBLE, &highlighter.theme).unwrap();
         let dynamic_directory_style =
@@ -819,7 +859,7 @@ mod tests {
         fs::write(test_path, "test contents")?;
         let pwd = Some(dir.path().to_str().unwrap());
 
-        let highlighter = Highlighter::new(&test_config())?;
+        let highlighter = HighlighterBuilder::new(&test_config()).build()?;
         let dynamic_file_style =
             resolve_static_style(DYNAMIC_PATH_FILE, &highlighter.theme).unwrap();
         let parameter_style = resolve_static_style(PARAMETER, &highlighter.theme).unwrap();
@@ -844,7 +884,7 @@ mod tests {
         fs::write(test_path, "test contents")?;
         let pwd = Some(dir.path().to_str().unwrap());
 
-        let highlighter = Highlighter::new(&test_config())?;
+        let highlighter = HighlighterBuilder::new(&test_config()).build()?;
         let dynamic_file_style =
             resolve_static_style(DYNAMIC_PATH_FILE, &highlighter.theme).unwrap();
         let redirection_style = resolve_static_style(REDIRECTION, &highlighter.theme).unwrap();
@@ -900,7 +940,7 @@ mod tests {
         let dir = tempfile::tempdir()?;
         let pwd = Some(dir.path().to_str().unwrap());
 
-        let highlighter = Highlighter::new(&test_config())?;
+        let highlighter = HighlighterBuilder::new(&test_config()).build()?;
 
         let highlighted = highlighter.highlight("\"ls\"", pwd, |_| true)?;
         assert_eq!(highlighted, vec![dynamic_span(0, 4, "ls")]);
@@ -946,7 +986,7 @@ mod tests {
         fs::set_permissions(&s_path, Permissions::from_mode(0o755))?;
         let pwd = Some(dir.path().to_str().unwrap());
 
-        let highlighter = Highlighter::new(&test_config())?;
+        let highlighter = HighlighterBuilder::new(&test_config()).build()?;
         let escape_style = resolve_static_style(CHARACTER_ESCAPE, &highlighter.theme).unwrap();
         let dynamic_callable_style =
             resolve_static_style(DYNAMIC_CALLABLE_COMMAND, &highlighter.theme).unwrap();
@@ -985,7 +1025,7 @@ mod tests {
         let dir = tempfile::tempdir()?;
         let pwd = Some(dir.path().to_str().unwrap());
 
-        let highlighter = Highlighter::new(&test_config())?;
+        let highlighter = HighlighterBuilder::new(&test_config()).build()?;
         let dynamic_file_style =
             resolve_static_style(DYNAMIC_PATH_FILE, &highlighter.theme).unwrap();
         let escape_style = resolve_static_style(CHARACTER_ESCAPE, &highlighter.theme).unwrap();
@@ -1022,7 +1062,7 @@ mod tests {
         fs::write(test_path1, "test contents")?;
         let pwd = Some(dir.path().to_str().unwrap());
 
-        let highlighter = Highlighter::new(&test_config())?;
+        let highlighter = HighlighterBuilder::new(&test_config()).build()?;
         let dynamic_file_style =
             resolve_static_style(DYNAMIC_PATH_FILE, &highlighter.theme).unwrap();
         let string_style = resolve_static_style(STRING_QUOTED_DOUBLE, &highlighter.theme).unwrap();
@@ -1123,7 +1163,7 @@ mod tests {
         fs::set_permissions(&test_path, Permissions::from_mode(0o755))?;
         let pwd = Some(dir.path().to_str().unwrap());
 
-        let highlighter = Highlighter::new(&test_config())?;
+        let highlighter = HighlighterBuilder::new(&test_config()).build()?;
         let dynamic_command_style =
             resolve_static_style(DYNAMIC_CALLABLE_COMMAND, &highlighter.theme).unwrap();
 
@@ -1151,7 +1191,7 @@ mod tests {
         fs::write(test_path, "test contents")?;
         let pwd = Some(dir.path().to_str().unwrap());
 
-        let highlighter = Highlighter::new(&test_config())?;
+        let highlighter = HighlighterBuilder::new(&test_config()).build()?;
         let dynamic_file_style =
             resolve_static_style(DYNAMIC_PATH_FILE, &highlighter.theme).unwrap();
         let string_style = resolve_static_style(STRING_QUOTED_DOUBLE, &highlighter.theme).unwrap();
@@ -1191,7 +1231,7 @@ mod tests {
         fs::write(test_path, "test contents")?;
         let pwd = Some(dir.path().to_str().unwrap());
 
-        let highlighter = Highlighter::new(&test_config())?;
+        let highlighter = HighlighterBuilder::new(&test_config()).build()?;
         let parameter_style = resolve_static_style(PARAMETER, &highlighter.theme).unwrap();
         let dynamic_file_style =
             resolve_static_style(DYNAMIC_PATH_FILE, &highlighter.theme).unwrap();
@@ -1227,7 +1267,7 @@ mod tests {
         fs::write(env_path, "test contents")?;
         let pwd = Some(dir.path().to_str().unwrap());
 
-        let highlighter = Highlighter::new(&test_config())?;
+        let highlighter = HighlighterBuilder::new(&test_config()).build()?;
         let env_var_style = resolve_static_style(ENVIRONMENT_VARIABLE, &highlighter.theme).unwrap();
         let dynamic_file_style =
             resolve_static_style(DYNAMIC_PATH_FILE, &highlighter.theme).unwrap();
@@ -1274,7 +1314,7 @@ mod tests {
         fs::write(env_path, "test contents")?;
         let pwd = Some(dir.path().to_str().unwrap());
 
-        let highlighter = Highlighter::new(&test_config())?;
+        let highlighter = HighlighterBuilder::new(&test_config()).build()?;
         let env_var_style = resolve_static_style(ENVIRONMENT_VARIABLE, &highlighter.theme).unwrap();
         let dynamic_file_style =
             resolve_static_style(DYNAMIC_PATH_FILE, &highlighter.theme).unwrap();
